@@ -54,34 +54,50 @@ body.pc .b{height:32px;min-width:34px}body.pc select,body.pc .num{height:32px}
 .seg{border-radius:7px;overflow:hidden;box-shadow:0 0 0 1px #2f3543}.seg .b{border:0;box-shadow:none}
 #bar{gap:5px;background:linear-gradient(#191c24,#14171e)}
 #lvlSeg:empty{display:none}#lvlSeg .b{min-width:26px;padding:0 6px}
+/* barra y panel lateral */
+#curBtn{max-width:230px;justify-content:flex-start;font-weight:600}#curT{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:19}#scrim.show{opacity:1;pointer-events:auto}
+#drawer{position:fixed;top:0;left:0;bottom:0;width:min(370px,88vw);background:var(--panel);border-right:1px solid var(--line);box-shadow:8px 0 30px rgba(0,0,0,.35);
+  transform:translateX(-103%);transition:transform .22s ease;z-index:20;display:flex;flex-direction:column}
+#drawer.show{transform:none}
+.dh{display:flex;gap:6px;padding:10px 10px 6px}
+#q{flex:1;height:34px;background:#1d212b;border:1px solid var(--line);border-radius:8px;padding:0 10px;color:var(--fg)}
+#dNext{padding:0 10px 6px}#dNext .b{width:100%;justify-content:flex-start;height:34px}
+#dList{flex:1;overflow:auto;padding:0 6px 14px;overscroll-behavior:contain}
+.ch{display:flex;justify-content:space-between;width:100%;padding:10px 6px 6px;background:none;border:0;border-top:1px solid var(--line);color:var(--mute);font:600 12px system-ui;cursor:pointer}
+.w{display:flex;align-items:center;gap:5px;padding:7px 8px;border-radius:8px;cursor:pointer}
+.w:hover{background:#1f2430}.w.cur{background:#22304d;box-shadow:inset 0 0 0 1px #3d5a99}
+.w .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip{flex:none;font:600 11px system-ui;min-width:24px;height:22px;border-radius:6px;border:1px solid var(--line);background:#1b1f28;color:var(--mute);cursor:pointer}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#06101f}.chip.dom{box-shadow:inset 0 -2px 0 #3ecf8e}
 </style>
 </head>
 <body>
 <div id="app">
 <div id="bar">
-  <button class="b" id="fsBtn" title="Pantalla completa">⛶</button>
-  <button class="b" id="menuBtn" title="Más opciones">⚙</button>
-  <button class="b" id="histBtn" title="Progreso e historial">📊</button>
-  <select id="song" title="Biblioteca"></select>
-  <div class="seg" id="lvlSeg" title="Nivel de la partitura: P principiante · I intermedio · A avanzado"></div>
-  <button class="b play on" id="play" title="Reproducir / Pausa (Espacio)">▶</button>
-  <button class="b" id="restart" title="Volver al inicio de la selección">⏮</button>
+  <button class="b" id="libBtn" title="Biblioteca">☰</button>
+  <button class="b" id="curBtn" title="Elegir obra"><span id="curT">—</span></button>
+  <div class="seg" id="lvlSeg" title="Nivel: P principiante · I intermedio · A avanzado"></div>
   <span class="sep"></span>
-  <div class="seg act" title="Escuchar la obra o practicarla"><button class="b" data-act="listen">🎧 Escuchar</button><button class="b" data-act="practice">🎹 Practicar</button></div>
-  <div class="seg pr" title="Espera: avanza cuando tocás bien · Tempo: sigue el pulso"><button class="b" data-mode="wait">Espera</button><button class="b" data-mode="tempo">Tempo</button></div>
+  <button class="b" id="restart" title="Volver al inicio de la selección">⏮</button>
+  <button class="b play on" id="play" title="Reproducir / Pausa (Espacio)">▶</button>
+  <div class="seg act" title="Escuchar la obra o practicarla"><button class="b" data-act="listen" title="Escuchar">🎧</button><button class="b" data-act="practice" title="Practicar">🎹 Practicar</button></div>
   <div class="seg pr" title="Mano que practicás (la otra suena sola)"><button class="b" data-hand="L">Izq</button><button class="b" data-hand="B">Ambas</button><button class="b" data-hand="R">Der</button></div>
   <input id="speed" type="range" min="20" max="120" step="5" title="Velocidad"><span id="speedTxt" class="lbl">60%</span>
-  <span class="sep"></span>
-  <button class="b" id="selBtn" title="Elegir compases tocando la partitura">✂</button>
-  <input id="from" class="num" type="number" min="1" title="Desde compás"><span class="lbl">–</span><input id="to" class="num" type="number" min="1" title="Hasta compás">
-  <button class="b" id="loopBtn" title="Repetir selección">🔁</button>
-  <button class="b" id="allBtn" title="Obra completa">Todo</button>
-  <span class="sep"></span>
+  <button class="b" id="loopBtn" title="Repetir el tramo elegido">🔁</button>
   <button class="b" id="scoreBtn" title="Mostrar / ocultar partitura">🎼</button>
   <button class="b" id="sndBtn" title="Sonido de la app">🔊</button>
-  <button class="b" id="midiBtn" title="Piano MIDI"><span class="dot" id="midiDot"></span>🎹</button>
+  <button class="b" id="histBtn" title="Progreso e historial">📊</button>
+  <button class="b" id="menuBtn" title="Más opciones">⚙</button>
   <div id="stats"><span class="ok">✔<b id="sOk">0</b></span><span class="bad">✖<b id="sBad">0</b></span><span>c.<b id="sBar">1</b></span></div>
 </div>
+<select id="song" hidden></select>
+<div id="scrim"></div>
+<aside id="drawer" aria-label="Biblioteca">
+  <div class="dh"><input id="q" type="search" placeholder="Buscar obra o compositor…" autocomplete="off"><button class="b" id="dClose" title="Cerrar">✕</button></div>
+  <div id="dNext"></div>
+  <div id="dList"></div>
+</aside>
 <div id="stage">
   <div id="scoreWrap"><div id="score"></div><div id="loopBox" class="mbox"></div><div id="cur" class="mbox"></div></div>
   <canvas id="roll"></canvas>
@@ -91,12 +107,15 @@ body.pc .b{height:32px;min-width:34px}body.pc select,body.pc .num{height:32px}
 <div id="menu">
   <div class="row"><span>Importar paquete o partituras</span><label class="b">📂<input id="file" type="file" accept=".json,.xml,.musicxml,application/json" multiple hidden></label></div>
   <div class="row"><span>Borrar categoría importada</span><button class="b" id="delCat">🗑</button></div>
+  <div class="row pr"><span>Modo de práctica</span><div class="seg"><button class="b" data-mode="wait" title="Avanza cuando tocás bien">Espera</button><button class="b" data-mode="tempo" title="Sigue el pulso">Tempo</button></div></div>
+  <div class="row"><span>Tramo</span><span><button class="b" id="selBtn" title="Elegir tocando la partitura">✂</button> <input id="from" class="num" type="number" min="1" title="Desde compás"> – <input id="to" class="num" type="number" min="1" title="Hasta compás"> <button class="b" id="allBtn">Todo</button></span></div>
+  <div class="row"><span>Pantalla completa</span><button class="b" id="fsBtn">⛶</button></div>
   <div class="row"><span>Alto de la partitura</span><div class="seg"><button class="b" data-sh="25">S</button><button class="b" data-sh="35">M</button><button class="b" data-sh="50">L</button></div></div>
   <div class="row"><span>Nombres en las notas</span><div class="seg"><button class="b" data-names="0">No</button><button class="b" data-names="1">Do Re</button><button class="b" data-names="2">C D</button></div></div>
   <div class="row"><span>Dedos (digitación)</span><button class="b" id="fingBtn">On</button></div>
   <div class="row"><span>Metrónomo</span><button class="b" id="metBtn">Off</button></div>
   <div class="row"><span>Interfaz</span><div class="seg"><button class="b" data-ui="mob">📱 Móvil</button><button class="b" data-ui="pc">🖥 PC</button></div></div>
-  <div class="row"><span id="midiInfo" class="lbl">Piano: sin conectar</span><button class="b" id="midiBtn2">Conectar</button></div>
+  <div class="row"><span id="midiInfo" class="lbl">Piano: sin conectar</span><button class="b" id="midiBtn"><span class="dot" id="midiDot"></span> Conectar</button></div>
   <div class="row"><span>Diagnóstico del piano</span><button class="b" id="diagBtn">🩺 Probar</button></div>
   <div class="row lbl" id="diagOut" style="display:none;white-space:pre-line;line-height:1.5"></div>
   <div class="row lbl">Tocá un compás de la partitura para saltar ahí. ✂ y dos toques = elegir tramo.</div>
@@ -359,7 +378,7 @@ function toggleScore(){B.classList.toggle('noscore');store.set('score',!B.classL
 $('scoreBtn').onclick=toggleScore;
 $('sndBtn').onclick=()=>{S.snd=!S.snd;store.set('snd',S.snd);$('sndBtn').classList.toggle('on',S.snd);$('sndBtn').textContent=S.snd?'🔊':'🔇';if(!S.snd)for(const m of [...voices.keys()])noteOff(m)};
 $('metBtn').onclick=()=>{S.met=!S.met;store.set('met',S.met);$('metBtn').classList.toggle('on',S.met);$('metBtn').textContent=S.met?'On':'Off'};
-$('midiBtn').onclick=$('midiBtn2').onclick=connectMIDI;
+$('midiBtn').onclick=connectMIDI;
 S.fing=store.get('fing',true);$('fingBtn').classList.toggle('on',S.fing);$('fingBtn').textContent=S.fing?'On':'Off';
 $('fingBtn').onclick=()=>{S.fing=!S.fing;store.set('fing',S.fing);$('fingBtn').classList.toggle('on',S.fing);$('fingBtn').textContent=S.fing?'On':'Off';drawKb()};
 $('menuBtn').onclick=e=>{e.stopPropagation();$('menu').classList.toggle('show')};
@@ -430,9 +449,29 @@ function variantOf(w){const v=variants(w),saved=store.get('lv:'+w,null);return (
 function workMark(w){const v=variants(w);return v.some(e=>mastered(e.title))?'⭐ ':v.some(e=>histOf(e.title).length)?'◐ ':''}
 function workLabel(w){const lv=variants(w).map(e=>e.lvl).filter(Boolean);return workMark(w)+w+(lv.length>1?'  ·  '+lv.join(' '):'')}
 function selectV(v){const e=entry(v);if(!e)return;const o=[...$('song').options].find(o=>{const x=entry(o.value);return x&&x.work===e.work});if(o)o.value=v;$('song').value=v;store.set('song2',v);return openSel(v)}
-function renderLvl(v){const el=$('lvlSeg');el.innerHTML='';const e=entry(v);if(!e)return;const vs=variants(e.work);if(vs.length<2)return;
+function renderLvl(v){const el=$('lvlSeg');el.innerHTML='';const e=entry(v);$('curT').textContent=e?e.work:(S.song?S.song.title:'—');if(!e)return;const vs=variants(e.work);if(vs.length<2)return;
   for(const x of vs){const b=document.createElement('button');b.className='b'+(x.v===v?' on':'');b.textContent=x.lvl||'?';b.title=LVN[x.lvl]||'';
     b.onclick=()=>{store.set('lv:'+e.work,x.lvl);selectV(x.v);toast((LVN[x.lvl]||'')+': '+x.title,2200)};el.appendChild(b)}}
+
+/* ---------- panel lateral de biblioteca ---------- */
+function renderDrawer(){const q=$('q').value.trim().toLowerCase(),cur=entry($('song').value),el=$('dList');el.innerHTML='';const open=store.get('cats_open',null);
+  const cats=[];for(const e of LIB){let c=cats.find(c=>c.name===e.cat);if(!c)cats.push(c={name:e.cat,works:[]});if(!c.works.includes(e.work))c.works.push(e.work)}
+  for(const c of cats){const ws=c.works.filter(w=>!q||w.toLowerCase().includes(q));if(!ws.length)continue;
+    const done=c.works.filter(w=>variants(w).some(e=>mastered(e.title))).length,isOpen=!!q||(open?open.includes(c.name):!!(cur&&cur.cat===c.name));
+    const h=document.createElement('button');h.className='ch';h.innerHTML=`<span>${isOpen?'▾':'▸'} ${esc(c.name)}</span><span>${done}/${c.works.length} ⭐</span>`;
+    h.onclick=()=>{let o=store.get('cats_open',null)||(cur?[cur.cat]:[]);o=o.includes(c.name)?o.filter(x=>x!==c.name):[...o,c.name];store.set('cats_open',o);renderDrawer()};el.appendChild(h);
+    if(!isOpen)continue;
+    for(const w of ws){const vs=variants(w),row=document.createElement('div');row.className='w'+(cur&&cur.work===w?' cur':'');
+      row.innerHTML=`<span class="t">${esc(workMark(w)+w)}</span>`+vs.filter(e=>e.lvl).map(e=>`<button class="chip${cur&&cur.v===e.v?' on':''}${mastered(e.title)?' dom':''}" data-v="${esc(e.v)}" title="${LVN[e.lvl]||''}">${e.lvl}</button>`).join('');
+      row.onclick=ev=>{const v=ev.target.dataset&&ev.target.dataset.v;if(v)store.set('lv:'+w,entry(v).lvl);selectV(v||variantOf(w));closeDrawer()};el.appendChild(row)}}
+  if(!el.children.length)el.innerHTML='<div class="lbl" style="padding:12px">Sin resultados.</div>';
+  const nx=window.EMBED?EMBED.findIndex(o=>!mastered(o.title)):-1;$('dNext').innerHTML=nx>=0?`<button class="b" id="dNextB">➡ Siguiente: ${esc(EMBED[nx].work||EMBED[nx].title)}</button>`:'';
+  if(nx>=0)$('dNextB').onclick=()=>{selectV('emb:'+nx);closeDrawer()}}
+function openDrawer(){$('menu').classList.remove('show');$('hist').classList.remove('show');renderDrawer();$('drawer').classList.add('show');$('scrim').classList.add('show');
+  setTimeout(()=>{const L=$('dList'),c=L.querySelector('.w.cur');if(c)L.scrollTop=c.offsetTop-L.offsetTop-L.clientHeight/2+c.offsetHeight/2},60)}
+function closeDrawer(){$('drawer').classList.remove('show');$('scrim').classList.remove('show')}
+$('libBtn').onclick=$('curBtn').onclick=openDrawer;$('scrim').onclick=closeDrawer;$('dClose').onclick=closeDrawer;$('q').oninput=renderDrawer;
+addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
 async function loadLibrary(skipOpen){
   const sel=$('song');sel.innerHTML='';LIB=[];
   if(window.EMBED)EMBED.forEach((s,i)=>LIB.push({v:'emb:'+i,title:s.title,work:s.work||s.title,lvl:s.lvl||'',cat:s.cat||'Biblioteca'}));
