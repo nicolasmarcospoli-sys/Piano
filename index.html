@@ -75,6 +75,15 @@ body:not(.pc) #curBtn{max-width:150px}body:not(.pc) #speedTxt{display:none}body:
 .b svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}.b svg .f{fill:currentColor;stroke:none}
 .b.play svg{width:15px;height:15px}
 body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font-size:14px}body.pc #curBtn{max-width:300px}
+/* botones planos y mates (sin brillos), como el teclado */
+.b,body.pc .b{background:#24272d;border:1px solid #31353d;box-shadow:none;transition:background .15s,border-color .15s;font-weight:500;color:#d9dbe0}
+.b:hover{background:#2a2e35;border-color:#3b4049}.b:active{transform:none;background:#2e3239}
+.b.on{background:#4b6b9a;border-color:#4b6b9a;color:#f2f4f7;box-shadow:none}
+.act .b.on{background:#a68a4a;border-color:#a68a4a;color:#fff}
+.b.play,.b.play.on{background:#4b6b9a;border-color:#4b6b9a;color:#f2f4f7}
+.seg{box-shadow:0 0 0 1px #31353d}.seg .b{border:0}
+#bar{background:#1b1d22;border-bottom:1px solid #2a2d33}
+.chip.on{background:#4b6b9a;border-color:#4b6b9a;color:#f2f4f7}
 </style>
 </head>
 <body>
@@ -334,9 +343,11 @@ async function renderScore(){
   await osmd.load(S.xml);osmd.zoom=1;osmd.render();
   // escalar para que el sistema (ambos pentagramas) entre en el alto de la franja
   // alto según las líneas de los pentagramas (no las notas con líneas adicionales), con margen para ellas
-  const ml0=osmd.GraphicSheet.MeasureList[0].filter(Boolean),y0=ml0[0].PositionAndShape.AbsolutePosition.y,y1=ml0[ml0.length-1].PositionAndShape.AbsolutePosition.y+4;
-  const H=$('scoreWrap').clientHeight,M=4.5;
-  rectCache=[];if(H>0&&y1>y0){osmd.zoom=Math.max(.3,Math.min(2.2,H/((y1-y0+2*M)*10)));osmd.render();scoreTop=(y0-M)*10*osmd.zoom;$('scoreWrap').scrollTop=scoreTop}
+  // alto real de lo escrito: borde superior/inferior de cada compás (percentil 8/92 para ignorar una nota aislada muy aguda o grave)
+  const tops=[],bots=[];for(const ml of osmd.GraphicSheet.MeasureList){const v=(ml||[]).filter(Boolean);if(!v.length)continue;const f=v[0].PositionAndShape,l=v[v.length-1].PositionAndShape;tops.push(f.AbsolutePosition.y+Math.min(0,f.BorderTop));bots.push(l.AbsolutePosition.y+Math.max(4,l.BorderBottom))}
+  const q=(arr,p)=>{const x=[...arr].sort((m,n)=>m-n);return x[Math.min(x.length-1,Math.floor(p*(x.length-1)))]};
+  const y0=q(tops,.08)-1.2,y1=q(bots,.92)+1.2,H=$('scoreWrap').clientHeight;
+  rectCache=[];if(H>0&&y1>y0){osmd.zoom=Math.max(.3,Math.min(2.2,H/((y1-y0)*10)));osmd.render();scoreTop=y0*10*osmd.zoom;$('scoreWrap').scrollTop=scoreTop}
   updateLoopBox();updateCursor(true)}
 let scoreTop=0;
 function svgScale(){const svg=$('score').querySelector('svg');if(!svg)return null;const vb=svg.viewBox.baseVal,r=svg.getBoundingClientRect();return{k:vb&&vb.height?r.height/vb.height:1,svg}}
