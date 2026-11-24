@@ -70,6 +70,11 @@ body.pc .b{height:32px;min-width:34px}body.pc select,body.pc .num{height:32px}
 .w .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chip{flex:none;font:600 11px system-ui;min-width:24px;height:22px;border-radius:6px;border:1px solid var(--line);background:#1b1f28;color:var(--mute);cursor:pointer}
 .chip.on{background:var(--acc);border-color:var(--acc);color:#06101f}.chip.dom{box-shadow:inset 0 -2px 0 #3ecf8e}
+.grow{flex:1 1 0;min-width:4px}
+body:not(.pc) #curBtn{max-width:150px}body:not(.pc) #speedTxt{display:none}body:not(.pc) #speed{width:56px}
+.b svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}.b svg .f{fill:currentColor;stroke:none}
+.b.play svg{width:15px;height:15px}
+body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font-size:14px}body.pc #curBtn{max-width:300px}
 </style>
 </head>
 <body>
@@ -78,13 +83,14 @@ body.pc .b{height:32px;min-width:34px}body.pc select,body.pc .num{height:32px}
   <button class="b" id="libBtn" title="Biblioteca">☰</button>
   <button class="b" id="curBtn" title="Elegir obra"><span id="curT">—</span></button>
   <div class="seg" id="lvlSeg" title="Nivel: P principiante · I intermedio · A avanzado"></div>
-  <span class="sep"></span>
+  <span class="grow"></span>
   <button class="b" id="restart" title="Volver al inicio de la selección">⏮</button>
   <button class="b play on" id="play" title="Reproducir / Pausa (Espacio)">▶</button>
   <div class="seg act" title="Escuchar la obra o practicarla"><button class="b" data-act="listen" title="Escuchar">🎧</button><button class="b" data-act="practice" title="Practicar">🎹 Practicar</button></div>
   <div class="seg pr" title="Mano que practicás (la otra suena sola)"><button class="b" data-hand="L">Izq</button><button class="b" data-hand="B">Ambas</button><button class="b" data-hand="R">Der</button></div>
   <input id="speed" type="range" min="20" max="120" step="5" title="Velocidad"><span id="speedTxt" class="lbl">60%</span>
   <button class="b" id="loopBtn" title="Repetir el tramo elegido">🔁</button>
+  <span class="grow"></span>
   <button class="b" id="scoreBtn" title="Mostrar / ocultar partitura">🎼</button>
   <button class="b" id="sndBtn" title="Sonido de la app">🔊</button>
   <button class="b" id="histBtn" title="Progreso e historial">📊</button>
@@ -270,6 +276,12 @@ function tick(ts){
 /* ---------- cascada + teclado ---------- */
 const roll=$('roll'),kb=$('kb');let lo=48,hi=84;
 const isBlack=m=>[1,3,6,8,10].includes(m%12);
+// cuántas teclas blancas entran con proporción de piano real (ancho ≈ 0,28 × alto visible), centradas en la obra
+function fitRange(){if(S.mlo==null)return;const W=kb.clientWidth||innerWidth,H=kb.clientHeight||90;
+  const want=Math.max(15,Math.min(52,Math.round(W/(H*.28))));const whites=[];for(let m=21;m<=108;m++)if(!isBlack(m))whites.push(m);
+  const a=whites.findIndex(m=>m>=S.mlo-1),z=whites.findIndex(m=>m>=S.mhi+1);let n=Math.max(want,(z<0?51:z)-(a<0?0:a)+2);
+  let i0=Math.round(((a<0?0:a)+(z<0?51:z))/2-n/2);i0=Math.max(0,Math.min(52-n,i0));lo=whites[i0];hi=whites[Math.min(51,i0+n-1)];
+  if(isBlack(lo-1)&&lo>21)lo--;if(isBlack(hi+1)&&hi<108)hi++}
 const NM=[['Do','Do#','Re','Re#','Mi','Fa','Fa#','Sol','Sol#','La','La#','Si'],['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']];
 function fit(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;if(c.width!==Math.round(r.width*d)||c.height!==Math.round(r.height*d)){c.width=Math.round(r.width*d);c.height=Math.round(r.height*d)}return d}
 function keyGeom(W){const whites=[];for(let m=lo;m<=hi;m++)if(!isBlack(m))whites.push(m);const ww=W/whites.length,g={};
@@ -303,7 +315,7 @@ function drawKb(){if(!kb.offsetParent)return;const d=fit(kb),W=kb.width,H=kb.hei
       const gr=x.createLinearGradient(0,0,0,h);gr.addColorStop(0,f.c+'55');gr.addColorStop(1,f.c);
       x.globalAlpha=a;x.fillStyle=gr;x.fillRect(kx,sink,kw,h-sink);x.globalAlpha=a*.5;x.fillStyle='#000';x.fillRect(kx,0,kw,sink);x.globalAlpha=1}
     if(!pass&&m%12===0){x.fillStyle='#888';x.font=`${9*d}px system-ui`;x.fillText((S.names===2?'C':'Do')+(m/12-1),k.x+2*d,H-4*d)}}
-  x.fillStyle='#3b2222';x.fillRect(0,0,W,2*d);if(waitOn()&&S.waitIdx>=0&&S.song)for(const n of chordAt(S.waitIdx)){const k=g[n.m];if(!k)continue;x.fillStyle=n.h==='R'?'#4f9dff':'#ffa94d';const cy=(k.b?H*.62:H)-14*d,rad=n.f&&S.fing?8*d:5*d;x.beginPath();x.arc(k.x+k.w/2,cy,rad,0,7);x.fill();if(n.f&&S.fing){x.fillStyle='#081018';x.font=`700 ${11*d}px system-ui`;x.textAlign='center';x.textBaseline='middle';x.fillText(n.f,k.x+k.w/2,cy+.5*d);x.textAlign='left';x.textBaseline='alphabetic'}}}
+  x.fillStyle='#3b2222';x.fillRect(0,0,W,2*d);if(waitOn()&&S.waitIdx>=0&&S.song)for(const n of chordAt(S.waitIdx)){const k=g[n.m];if(!k)continue;const c=n.h==='R'?'79,157,255':'255,169,77',kh=k.b?H*.62:H,fr=k.b?0:Math.max(3*d,kh*.045);x.fillStyle=`rgba(${c},.32)`;x.fillRect(k.x+d,0,k.w-2*d,kh-fr);x.fillStyle=`rgb(${c})`;x.fillRect(k.x+d,0,k.w-2*d,3*d);const rad=Math.min(9*d,k.w*.38),cy=kh-fr-rad-5*d;x.beginPath();x.arc(k.x+k.w/2,cy,rad,0,7);x.fill();if(n.f&&S.fing){x.fillStyle='#081018';x.font=`700 ${rad*1.25}px system-ui`;x.textAlign='center';x.textBaseline='middle';x.fillText(n.f,k.x+k.w/2,cy+.5*d);x.textAlign='left';x.textBaseline='alphabetic'}}}
 // brillo que sube desde la tecla hacia la cascada
 function drawGlow(x,g,H,d,now){for(const[m]of fx){const k=g[m];if(!k)continue;const a=fxAmt(m,now);if(a<=0)continue;const f=fx.get(m),gh=H*.22*a;
   const gr=x.createLinearGradient(0,H,0,H-gh);gr.addColorStop(0,f.c+'aa');gr.addColorStop(1,f.c+'00');x.fillStyle=gr;x.fillRect(k.x+k.w*.1,H-gh,k.w*.8,gh)}}
@@ -354,7 +366,7 @@ $('scoreWrap').addEventListener('click',e=>{if(!osmd||!S.song)return;const w=$('
   syncRange();resetRun()});
 
 /* ---------- controles ---------- */
-function setPlay(p){S.playing=p;$('play').textContent=p?'⏸':'▶';keepAwake(p);if(p){audio();const r=range();if(S.pos<r.a||S.pos>=r.z)resetRun()}else{for(const m of S.autoOn.keys())noteOff(m);S.autoOn.clear()}}
+function setPlay(p){S.playing=p;$('play').innerHTML=ic(p?'pause':'play');keepAwake(p);if(p){audio();const r=range();if(S.pos<r.a||S.pos>=r.z)resetRun()}else{for(const m of S.autoOn.keys())noteOff(m);S.autoOn.clear()}}
 function syncRange(){$('from').value=S.from;$('to').value=S.to;updateLoopBox()}
 function seg(k,v){document.querySelectorAll(`[data-${k}]`).forEach(b=>b.classList.toggle('on',b.dataset[k]===String(v)))}
 $('play').onclick=()=>setPlay(!S.playing);
@@ -368,7 +380,7 @@ document.querySelectorAll('[data-names]').forEach(b=>b.onclick=()=>{S.names=+b.d
 document.querySelectorAll('[data-ui]').forEach(b=>b.onclick=()=>setUI(b.dataset.ui));
 function setSh(v){document.documentElement.style.setProperty('--sh',v+'%');seg('sh',v);setTimeout(()=>{renderScore();drawKb()},30)}
 function setUI(u){B.classList.toggle('pc',u==='pc');seg('ui',u);store.set('ui',u);setTimeout(()=>{renderScore();drawKb()},30)}
-$('speed').oninput=e=>{S.speed=+e.target.value;$('speedTxt').textContent=S.speed+'%';store.set('speed',S.speed)};
+$('speed').oninput=e=>{S.speed=+e.target.value;$('speedTxt').textContent=S.speed+'%';$('speed').title='Velocidad '+S.speed+'%';if(!B.classList.contains('pc'))toast('Velocidad '+S.speed+'%',900);store.set('speed',S.speed)};
 $('from').onchange=e=>{S.from=Math.max(1,+e.target.value||1);if(S.to<S.from)S.to=S.from;syncRange();resetRun()};
 $('to').onchange=e=>{S.to=Math.max(S.from,+e.target.value||S.from);syncRange();resetRun()};
 $('selBtn').onclick=()=>{S.sel=S.sel?0:1;$('selBtn').classList.toggle('on',!!S.sel);if(S.sel){if(B.classList.contains('noscore'))toggleScore();toast('Tocá el compás inicial en la partitura')}};
@@ -376,7 +388,7 @@ $('loopBtn').onclick=()=>{S.loop=!S.loop;store.set('loop',S.loop);$('loopBtn').c
 $('allBtn').onclick=()=>{S.from=1;S.to=S.song.bars.length;syncRange();resetRun()};
 function toggleScore(){B.classList.toggle('noscore');store.set('score',!B.classList.contains('noscore'));$('scoreBtn').classList.toggle('on',!B.classList.contains('noscore'));setTimeout(()=>{renderScore();drawKb()},30)}
 $('scoreBtn').onclick=toggleScore;
-$('sndBtn').onclick=()=>{S.snd=!S.snd;store.set('snd',S.snd);$('sndBtn').classList.toggle('on',S.snd);$('sndBtn').textContent=S.snd?'🔊':'🔇';if(!S.snd)for(const m of [...voices.keys()])noteOff(m)};
+$('sndBtn').onclick=()=>{S.snd=!S.snd;store.set('snd',S.snd);$('sndBtn').classList.toggle('on',S.snd);$('sndBtn').innerHTML=ic(S.snd?'vol':'mute');if(!S.snd)for(const m of [...voices.keys()])noteOff(m)};
 $('metBtn').onclick=()=>{S.met=!S.met;store.set('met',S.met);$('metBtn').classList.toggle('on',S.met);$('metBtn').textContent=S.met?'On':'Off'};
 $('midiBtn').onclick=connectMIDI;
 S.fing=store.get('fing',true);$('fingBtn').classList.toggle('on',S.fing);$('fingBtn').textContent=S.fing?'On':'Off';
@@ -385,7 +397,7 @@ $('menuBtn').onclick=e=>{e.stopPropagation();$('menu').classList.toggle('show')}
 document.addEventListener('click',e=>{if(!$('menu').contains(e.target)&&e.target!==$('menuBtn'))$('menu').classList.remove('show')});
 $('fsBtn').onclick=fullscreen;
 addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;if(e.code==='Space'){e.preventDefault();setPlay(!S.playing)}});
-let rz;addEventListener('resize',()=>{drawKb();clearTimeout(rz);rz=setTimeout(()=>{updateLoopBox();updateCursor(true)},150)});
+let rz;addEventListener('resize',()=>{fitRange();drawKb();clearTimeout(rz);rz=setTimeout(()=>{updateLoopBox();updateCursor(true)},150)});
 
 /* ---------- biblioteca: servidor + guardadas en el dispositivo (IndexedDB) ---------- */
 const idb=()=>new Promise((ok,ko)=>{const r=indexedDB.open('piano-practica',1);r.onupgradeneeded=()=>r.result.createObjectStore('songs');r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error)});
@@ -393,8 +405,7 @@ async function dev(op,key,val){const db=await idb();return new Promise((ok,ko)=>
   const r=op==='get'?st.get(key):op==='keys'?st.getAllKeys():op==='del'?st.delete(key):st.put(val,key);r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error)})}
 async function loadXML(txt,name){
   S.xml=txt;S.song=parseMusicXML(txt);if(name&&S.song.title==='Sin título')S.song.title=name;
-  const ms=S.song.notes.map(n=>n.m);lo=Math.min(...ms)-2;hi=Math.max(...ms)+2;
-  if(hi-lo<24){const c=(lo+hi)>>1;lo=c-12;hi=c+12}while(isBlack(lo))lo--;while(isBlack(hi))hi++;
+  const ms=S.song.notes.map(n=>n.m);S.mlo=Math.min(...ms);S.mhi=Math.max(...ms);fitRange();
   S.from=1;S.to=S.song.bars.length;$('from').max=$('to').max=S.song.bars.length;syncRange();S.ok=S.bad=0;stats();setPlay(false);resetRun();
   document.title=S.song.title+' · Piano Práctica';await renderScore();drawKb()}
 
@@ -472,6 +483,20 @@ function openDrawer(){$('menu').classList.remove('show');$('hist').classList.rem
 function closeDrawer(){$('drawer').classList.remove('show');$('scrim').classList.remove('show')}
 $('libBtn').onclick=$('curBtn').onclick=openDrawer;$('scrim').onclick=closeDrawer;$('dClose').onclick=closeDrawer;$('q').oninput=renderDrawer;
 addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
+
+/* ---------- íconos de línea (SVG) ---------- */
+const IC={menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',back:'<path d="M19 20 9 12l10-8z" class="f"/><path d="M5 19V5"/>',
+  play:'<path d="M7 4l13 8-13 8z" class="f"/>',pause:'<rect x="6" y="4" width="4" height="16" rx="1" class="f"/><rect x="14" y="4" width="4" height="16" rx="1" class="f"/>',
+  listen:'<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/>',
+  keys:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v9M12 4v9M16 4v9M8 13v7M12 13v7M16 13v7"/>',
+  loop:'<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  score:'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  vol:'<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',mute:'<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M23 9l-6 6M17 9l6 6"/>',
+  chart:'<path d="M3 3v18h18"/><path d="M8 16v-4M13 16V8M18 16v-7"/>',set:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'};
+const ic=n=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
+function setIcons(){$('libBtn').innerHTML=ic('menu');$('restart').innerHTML=ic('back');$('play').innerHTML=ic(S.playing?'pause':'play');
+  document.querySelector('[data-act="listen"]').innerHTML=ic('listen');document.querySelector('[data-act="practice"]').innerHTML=ic('keys')+' Practicar';
+  $('loopBtn').innerHTML=ic('loop');$('scoreBtn').innerHTML=ic('score');$('sndBtn').innerHTML=ic(S.snd?'vol':'mute');$('histBtn').innerHTML=ic('chart');$('menuBtn').innerHTML=ic('set')}
 async function loadLibrary(skipOpen){
   const sel=$('song');sel.innerHTML='';LIB=[];
   if(window.EMBED)EMBED.forEach((s,i)=>LIB.push({v:'emb:'+i,title:s.title,work:s.work||s.title,lvl:s.lvl||'',cat:s.cat||'Biblioteca'}));
@@ -509,9 +534,9 @@ $('file').onchange=async e=>{const fs=[...e.target.files];if(!fs.length)return;l
   const phone=matchMedia('(pointer:coarse)').matches;
   setUI(store.get('ui',phone?'mob':'pc'));setSh(store.get('sh',35));if(!store.get('score',true))B.classList.add('noscore');$('scoreBtn').classList.toggle('on',store.get('score',true));
   setAct(S.act);seg('mode',S.mode);seg('hand',S.hand);seg('names',S.names);$('speed').value=S.speed;$('speedTxt').textContent=S.speed+'%';
-  $('loopBtn').classList.toggle('on',S.loop);$('sndBtn').classList.toggle('on',S.snd);$('sndBtn').textContent=S.snd?'🔊':'🔇';$('metBtn').classList.toggle('on',S.met);$('metBtn').textContent=S.met?'On':'Off';
+  $('loopBtn').classList.toggle('on',S.loop);$('sndBtn').classList.toggle('on',S.snd);$('sndBtn').innerHTML=ic(S.snd?'vol':'mute');$('metBtn').classList.toggle('on',S.met);$('metBtn').textContent=S.met?'On':'Off';
   if(store.get('midiOk',false))connectMIDI();
-  loadLibrary();requestAnimationFrame(tick)})();
+  setIcons();loadLibrary();requestAnimationFrame(tick)})();
 </script>
 </body>
 </html>
