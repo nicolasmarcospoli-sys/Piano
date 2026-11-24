@@ -103,6 +103,7 @@ body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font
 .chip{min-width:28px;height:26px;border-radius:7px;border:1px solid #444a55;background:#2a2e36;color:#e2e5ea;font:600 12px system-ui}
 .chip:hover{border-color:#5d6573}.chip.on{background:#5b7fb8;border-color:#5b7fb8;color:#fff}.chip.dom{box-shadow:inset 0 -3px 0 #3ecf8e}
 #dNext .b{background:#263044;border-color:#34425e;color:#e8edf6;font-weight:600}
+#roll{touch-action:none;cursor:grab}#roll:active{cursor:grabbing}
 </style>
 </head>
 <body>
@@ -299,7 +300,7 @@ function tick(ts){
     S.pos=np;
     if(S.waitIdx===-2||S.pos>=r.z){passEnd();if(S.loop)resetRun();else{setPlay(false);toast('Fin · ✔ '+S.ok+'  ✖ '+S.bad,3000)}}
   }
-  drawRoll();drawKb();updateCursor();followScore();requestAnimationFrame(tick)}
+  stepInertia();drawRoll();drawKb();updateCursor();followScore();requestAnimationFrame(tick)}
 
 /* ---------- cascada + teclado ---------- */
 const roll=$('roll'),kb=$('kb');let lo=48,hi=84;
@@ -380,11 +381,11 @@ function place(el,r){if(!r){el.style.display='none';return}Object.assign(el.styl
 let curBar=-1;
 function updateCursor(force){if(!S.song)return;const b=S.song.bars;let i=b.findIndex(x=>S.pos>=x.t-1e-6&&S.pos<x.t+x.len);if(i<0)i=0;
   if(i===curBar&&!force)return;curBar=i;$('sBar').textContent=i+1;const r=barRect(i);place($('cur'),r);
-  if(r&&!S.playing){const w=$('scoreWrap');w.scrollTo({left:Math.max(0,r.x-w.clientWidth*.25),top:scoreTop})}}
+  if(r&&!S.playing){const w=$('scoreWrap');progScrollT=performance.now();w.scrollTo({left:Math.max(0,r.x-w.clientWidth*.25),top:scoreTop})}}
 // desplazamiento continuo: la posición actual queda fija al 25% del ancho y la fila corre sola
 function followScore(){if(!S.playing||!S.song||!osmd||B.classList.contains('noscore'))return;const r=barRect(curBar);if(!r)return;
   const b=S.song.bars[curBar],f=Math.min(1,Math.max(0,(S.pos-b.t)/b.len)),w=$('scoreWrap'),target=r.x+f*r.w-w.clientWidth*.25;
-  w.scrollLeft+=(target-w.scrollLeft)*.18;w.scrollTop=scoreTop}
+  progScrollT=performance.now();w.scrollLeft+=(target-w.scrollLeft)*.18;w.scrollTop=scoreTop}
 function updateLoopBox(){const lb=$('loopBox');if(!S.song||(S.from===1&&S.to===S.song.bars.length)){lb.style.display='none';return}
   const a=barRect(S.from-1),z=barRect(S.to-1);if(!a||!z){lb.style.display='none';return}place(lb,{x:a.x,y:a.y,w:z.x+z.w-a.x,h:a.h})}
 $('scoreWrap').addEventListener('click',e=>{if(!osmd||!S.song)return;const w=$('scoreWrap').getBoundingClientRect(),px=e.clientX-w.left+$('scoreWrap').scrollLeft;
@@ -527,6 +528,26 @@ const ic=n=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
 function setIcons(){$('libBtn').innerHTML=ic('menu');$('restart').innerHTML=ic('back');$('play').innerHTML=ic(S.playing?'pause':'play');
   document.querySelector('[data-act="listen"]').innerHTML=ic('listen');document.querySelector('[data-act="practice"]').innerHTML=ic('keys')+' Practicar';
   $('loopBtn').innerHTML=ic('loop');$('scoreBtn').innerHTML=ic('score');$('sndBtn').innerHTML=ic(S.snd?'vol':'mute');$('histBtn').innerHTML=ic('chart');$('menuBtn').innerHTML=ic('set')}
+
+/* ---------- navegar a mano por la obra: cascada (arrastre/rueda) y partitura (deslizar), sincronizadas ---------- */
+let scrub=null,inertia=0,progScrollT=0;
+function seekTo(p,fromScore){if(!S.song)return;const r=range();S.pos=Math.max(r.a,Math.min(r.z-1e-3,p));if(S.playing)setPlay(false);
+  for(const n of S.song.notes)if(n.t>=S.pos-1e-6){n._hit=0;n._auto=0}
+  S.done.clear();if(waitOn())S.waitIdx=nextWait(S.pos);updateCursor(true);if(!fromScore)scoreToPos();drawKb()}
+// la partitura acompaña: la posición actual queda al 25% del ancho
+function scoreToPos(){if(!osmd||B.classList.contains('noscore')||!S.song)return;const w=$('scoreWrap'),r=barRect(curBar);if(!r)return;
+  const b=S.song.bars[curBar],f=Math.min(1,Math.max(0,(S.pos-b.t)/b.len));progScrollT=performance.now();w.scrollLeft=r.x+f*r.w-w.clientWidth*.25}
+const ppb=()=>roll.clientHeight/5;   // píxeles por tiempo en la cascada (se ven 5 tiempos)
+roll.addEventListener('wheel',e=>{if(!S.song)return;e.preventDefault();inertia=0;seekTo(S.pos+(e.deltaY*(e.deltaMode===1?16:1))/ppb())},{passive:false});
+roll.addEventListener('pointerdown',e=>{if(!S.song)return;scrub={y:e.clientY,p:S.pos,t:performance.now(),v:0};inertia=0;roll.setPointerCapture(e.pointerId)});
+roll.addEventListener('pointermove',e=>{if(!scrub)return;const np=scrub.p+(e.clientY-scrub.y)/ppb(),now=performance.now(),dt=Math.max(8,now-scrub.t);
+  scrub.v=.7*scrub.v+.3*(np-S.pos)/dt;scrub.t=now;seekTo(np)});
+const endScrub=()=>{if(scrub&&performance.now()-scrub.t<80&&Math.abs(scrub.v)>.0004)inertia=scrub.v*16;scrub=null};
+roll.addEventListener('pointerup',endScrub);roll.addEventListener('pointercancel',endScrub);
+function stepInertia(){if(!inertia||S.playing||scrub)return;seekTo(S.pos+inertia);inertia*=.93;if(Math.abs(inertia)<.002)inertia=0}
+// al deslizar la partitura a mano, la cascada va al mismo punto
+$('scoreWrap').addEventListener('scroll',()=>{if(S.playing||!S.song||!osmd||performance.now()-progScrollT<150)return;const w=$('scoreWrap'),x=w.scrollLeft+w.clientWidth*.25;
+  for(let i=0;i<S.song.bars.length;i++){const r=barRect(i);if(r&&x>=r.x&&x<=r.x+r.w){const b=S.song.bars[i];seekTo(b.t+b.len*(x-r.x)/r.w,true);return}}},{passive:true});
 async function loadLibrary(skipOpen){
   const sel=$('song');sel.innerHTML='';LIB=[];
   if(window.EMBED)EMBED.forEach((s,i)=>LIB.push({v:'emb:'+i,title:s.title,work:s.work||s.title,lvl:s.lvl||'',cat:s.cat||'Biblioteca'}));
