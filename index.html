@@ -153,6 +153,7 @@ body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font
   <div class="row"><span id="midiInfo" class="lbl">Piano: sin conectar</span><button class="b" id="midiBtn"><span class="dot" id="midiDot"></span> Conectar</button></div>
   <div class="row"><span>Diagnóstico del piano</span><button class="b" id="diagBtn">🩺 Probar</button></div>
   <div class="row lbl" id="diagOut" style="display:none;white-space:pre-line;line-height:1.5"></div>
+  <div class="row lbl">Sonido: Salamander Grand Piano (Yamaha C5) · Alexander Holm · CC-BY 3.0</div>
   <div class="row lbl">Tocá un compás de la partitura para saltar ahí. ✂ y dos toques = elegir tramo.</div>
 </div>
 <div id="hist"></div>
@@ -217,23 +218,41 @@ const S={song:null,xml:'',playing:false,pos:0,act:store.get('act','practice'),mo
   snd:store.get('snd',true),met:store.get('met',false),loop:store.get('loop',true),names:store.get('names',1),from:1,to:1,sel:0,
   held:new Set(),hitKeys:new Map(),badKeys:new Map(),ok:0,bad:0,waitIdx:-1,done:new Set(),autoOn:new Map(),lastBeat:-1};
 
-/* ---------- audio ---------- */
+/* ---------- audio: piano Salamander (Yamaha C5) con dinámica, estéreo, sala y final natural ---------- */
 let ac=null,master=null;const voices=new Map();
-function audio(){if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();master=ac.createGain();master.gain.value=.35;master.connect(ac.destination)}if(ac.state==='suspended')ac.resume();return ac}
-// piano real: buffers decodificados una sola vez; si falla, se usa el sintetizador
-const SB={};let sbLoading=false;
-function loadSamples(){if(sbLoading||!window.PIANO_SAMPLES||!ac)return;sbLoading=true;
-  for(const k in PIANO_SAMPLES){const b=Uint8Array.from(atob(PIANO_SAMPLES[k]),c=>c.charCodeAt(0)).buffer;ac.decodeAudioData(b).then(buf=>SB[k]=buf).catch(()=>{})}}
-function sampleOn(m,vel){let best=null;for(const k in SB){if(best===null||Math.abs(k-m)<Math.abs(best-m))best=+k}if(best===null||Math.abs(best-m)>2)return false;
-  const t=ac.currentTime,src=ac.createBufferSource(),g=ac.createGain();src.buffer=SB[best];src.playbackRate.value=2**((m-best)/12);
-  g.gain.setValueAtTime(Math.min(1,.25+vel*.9),t);src.connect(g).connect(master);src.start(t);noteOff(m);voices.set(m,{g,o1:src,o2:null});return true}
+function audio(){if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();
+    // compresor suave: los acordes fuertes no saturan
+    const comp=ac.createDynamicsCompressor();comp.threshold.value=-14;comp.knee.value=12;comp.ratio.value=3;comp.attack.value=.005;comp.release.value=.2;comp.connect(ac.destination);
+    master=ac.createGain();master.gain.value=.55;master.connect(comp);
+    // sala: reverberación suave con una respuesta generada (sin archivos)
+    const cv=ac.createConvolver(),wet=ac.createGain();cv.buffer=roomIR(1.6);wet.gain.value=.16;master.connect(cv).connect(wet).connect(comp)}
+  if(ac.state==='suspended')ac.resume();return ac}
+function roomIR(sec){const n=Math.floor(ac.sampleRate*sec),b=ac.createBuffer(2,n,ac.sampleRate),pre=ac.sampleRate*.012;
+  for(let c=0;c<2;c++){const d=b.getChannelData(c);let lp=0;for(let i=0;i<n;i++){lp=lp*.55+(Math.random()*2-1)*Math.pow(1-i/n,3.2)*.45;d[i]=i<pre?0:lp}}return b}
+// bancos de muestras: Salamander (archivos junto a la app, se cargan una vez) y FluidR3 incluido (respaldo sin internet)
+const SAL={},SB={};let salLoading=false,sbLoading=false;
+const SAL_NAMES=(()=>{const o={},N={0:'C',3:'Ds',6:'Fs',9:'A'};for(let m=21;m<=108;m++)if(N[m%12]!==undefined)o[m]=N[m%12]+(Math.floor(m/12)-1);return o})();
+function loadSamples(){if(!ac)return;
+  if(!salLoading&&location.protocol.startsWith('http')){salLoading=true;
+    for(const m in SAL_NAMES)fetch('salamander/'+SAL_NAMES[m]+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SAL[m]=buf).catch(()=>{})}
+  if(!sbLoading&&window.PIANO_SAMPLES){sbLoading=true;
+    for(const k in PIANO_SAMPLES){const b=Uint8Array.from(atob(PIANO_SAMPLES[k]),c=>c.charCodeAt(0)).buffer;ac.decodeAudioData(b).then(buf=>SB[k]=buf).catch(()=>{})}}}
+function nearest(bank,m){let best=null;for(const k in bank)if(best===null||Math.abs(k-m)<Math.abs(best-m))best=+k;return best!==null&&Math.abs(best-m)<=2?best:null}
+function sampleOn(m,vel){let bank=SAL,best=nearest(SAL,m);if(best===null){bank=SB;best=nearest(SB,m)}if(best===null)return false;
+  const t=ac.currentTime,src=ac.createBufferSource(),tone=ac.createBiquadFilter(),g=ac.createGain(),v=Math.max(.05,Math.min(1,vel));
+  src.buffer=bank[best];src.playbackRate.value=2**((m-best)/12);
+  // dinámica: más fuerte = más volumen y más brillo (como el martillo sobre la cuerda)
+  tone.type='lowpass';tone.frequency.value=1800+v*v*14000;tone.Q.value=.3;g.gain.setValueAtTime(.08+v*v*.92,t);src.connect(tone).connect(g);
+  // estéreo: graves a la izquierda, agudos a la derecha (como sentado frente al piano)
+  if(ac.createStereoPanner){const pn=ac.createStereoPanner();pn.pan.value=Math.max(-.6,Math.min(.6,(m-64)/50));g.connect(pn).connect(master)}else g.connect(master);
+  noteOff(m,true);src.start(t);voices.set(m,{g,o1:src,o2:null});return true}
 function noteOn(m,vel=.7){if(!S.snd)return;audio();loadSamples();if(sampleOn(m,vel))return;const a=audio(),f=440*2**((m-69)/12),t=a.currentTime;
   const g=a.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vel*.5,t+.005);g.gain.exponentialRampToValueAtTime(vel*.18,t+.4);g.gain.exponentialRampToValueAtTime(.0008,t+3.5);
   const o1=a.createOscillator(),o2=a.createOscillator(),lp=a.createBiquadFilter();o1.type='triangle';o2.type='sine';o1.frequency.value=f;o2.frequency.value=f*2;
   lp.type='lowpass';lp.frequency.value=Math.min(9000,f*6);const g2=a.createGain();g2.gain.value=.25;
   o1.connect(lp);o2.connect(g2).connect(lp);lp.connect(g).connect(master);o1.start(t);o2.start(t);o1.stop(t+3.6);o2.stop(t+3.6);
   noteOff(m);voices.set(m,{g,o1,o2})}
-function noteOff(m){const v=voices.get(m);if(!v||!ac)return;const t=ac.currentTime;v.g.gain.cancelScheduledValues(t);v.g.gain.setTargetAtTime(0,t,v.o2?.08:.12);v.o1.stop(t+.6);if(v.o2)v.o2.stop(t+.6);voices.delete(m)}
+function noteOff(m,quick){const v=voices.get(m);if(!v||!ac)return;const t=ac.currentTime,rel=quick?.05:v.o2?.08:Math.max(.12,Math.min(.6,(72-m)/60*.6+.18));v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.setTargetAtTime(0,t,rel/3);v.o1.stop(t+rel*2+.1);if(v.o2)v.o2.stop(t+rel*2+.1);voices.delete(m)}
 function click(acc){if(!S.met)return;const a=audio(),t=a.currentTime,o=a.createOscillator(),g=a.createGain();o.frequency.value=acc?1600:1000;g.gain.setValueAtTime(.25,t);g.gain.exponentialRampToValueAtTime(.001,t+.05);o.connect(g).connect(master);o.start(t);o.stop(t+.06)}
 
 /* ---------- MIDI ---------- */
@@ -294,7 +313,7 @@ function tick(ts){
   if(S.playing&&S.song){const r=range();let adv=dt/beatSec();
     if(waitOn()&&S.waitIdx>=0){const t=S.song.notes[S.waitIdx].t;if(S.pos+adv>=t)adv=Math.max(0,t-S.pos)}
     const np=S.pos+adv;
-    for(const n of S.song.notes){if(n.t>=S.pos&&n.t<np&&n.t>=r.a&&n.t<r.z&&!mine(n)&&!n._auto){n._auto=1;noteOn(n.m,.45);S.autoOn.set(n.m,n.t+n.d);if(!S.held.has(n.m))fx.set(n.m,{t0:performance.now(),t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
+    for(const n of S.song.notes){if(n.t>=S.pos&&n.t<np&&n.t>=r.a&&n.t<r.z&&!mine(n)&&!n._auto){n._auto=1;noteOn(n.m,.62);S.autoOn.set(n.m,n.t+n.d);if(!S.held.has(n.m))fx.set(n.m,{t0:performance.now(),t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
     for(const[m,end]of S.autoOn){if(np>=end){noteOff(m);S.autoOn.delete(m);const f=fx.get(m);if(f&&!S.held.has(m))f.t1=performance.now()}}
     const fb=Math.floor(np+1e-6);if(fb!==S.lastBeat&&fb>=r.a&&adv>0){S.lastBeat=fb;const bar=S.song.bars.find(b=>fb>=b.t&&fb<b.t+b.len);click(bar&&Math.abs(fb-bar.t)<1e-6)}
     S.pos=np;
