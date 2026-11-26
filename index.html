@@ -68,7 +68,7 @@ body.pc .b{height:32px;min-width:34px}body.pc select,body.pc .num{height:32px}
 .b.play{border-radius:50%;min-width:34px;height:34px}
 .seg{border-radius:7px;overflow:hidden;box-shadow:0 0 0 1px #2f3543}.seg .b{border:0;box-shadow:none}
 #bar{gap:5px;background:linear-gradient(#191c24,#14171e)}
-#lvlSeg:empty{display:none}#lvlSeg .b{min-width:26px;padding:0 6px}
+#lvlSeg:empty{display:none}#menu .row.sq{flex-wrap:wrap;gap:6px}#lvlSeg .b{min-width:26px;padding:0 6px}
 /* barra y panel lateral */
 #curBtn{max-width:230px;justify-content:flex-start;font-weight:600}#curT{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:19}#scrim.show{opacity:1;pointer-events:auto}
@@ -177,9 +177,11 @@ body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font
   <div class="row lbl" id="diagOut" style="display:none;white-space:pre-line;line-height:1.5"></div>
   <div class="row"><span>🔒 Mis obras privadas</span><button class="b" id="encOpen">Desbloquear</button></div>
   <div class="row"><span>Cifrar mis obras (en la PC)</span><label class="b">🔐 Elegir archivo<input id="encFile" type="file" accept=".json,application/json" hidden></label></div>
-  <div class="row lbl">Sonido: Salamander Grand Piano (Yamaha C5) · Alexander Holm · CC-BY 3.0</div>
+  <div class="row sq"><span>Sonido del piano <span class="lbl" id="sqInfo"></span></span><div class="seg"><button class="b" data-sq="0" title="Incluido en la app: no descarga nada, suena sin internet">Básico</button><button class="b" data-sq="1" title="4 capas de fuerza, estéreo · descarga ~15 MB una vez">Estándar</button><button class="b" data-sq="2" title="8 capas de fuerza + ruido de apagadores + resonancia con pedal · ~33 MB una vez">Alto</button><button class="b" data-sq="3" title="Las 16 capas de fuerza + apagadores + ruido del pedal + resonancia · ~63 MB una vez">Máximo</button></div></div>
+  <div class="row lbl" style="line-height:1.45">Básico = incluido · Estándar ~15 MB · Alto ~33 MB · Máximo ~63 MB (se descarga una vez y queda en el teléfono; mejor con Wi-Fi).</div>
+  <div class="row lbl">Sonido: Salamander Grand Piano V3 (Yamaha C5) · Alexander Holm · CC-BY 3.0</div>
   <div class="row lbl">Tocá un compás de la partitura para saltar ahí. ✂ y dos toques = elegir tramo.</div>
-  <div class="row lbl" style="line-height:1.45">Sustain: “Ped” junto al teclado. <b style="color:#d9c08a">Relleno dorado</b> = pedal pisado (en 🎧, el de la app) · <b style="color:#d9c08a">borde dorado</b> = la obra pide pedal · franja dorada a la izquierda de la cascada = tramos con pedal. 🩺 Probar también detecta tu pedal.</div>
+  <div class="row lbl" style="line-height:1.45;display:block">Sustain: “Ped” junto al teclado. <b style="color:#d9c08a">Relleno dorado</b> = pedal pisado (en 🎧, el de la app) · <b style="color:#d9c08a">borde dorado</b> = la obra pide pedal · franja dorada a la izquierda de la cascada = tramos con pedal. 🩺 Probar también detecta tu pedal.</div>
 </div>
 <div id="hist"></div>
 <dialog id="pwDlg"><form method="dialog" id="pwForm">
@@ -268,54 +270,156 @@ const S={song:null,xml:'',playing:false,pos:0,act:store.get('act','practice'),mo
   snd:store.get('snd',true),met:store.get('met',false),loop:store.get('loop',true),names:store.get('names',1),from:1,to:1,sel:0,
   held:new Set(),hitKeys:new Map(),badKeys:new Map(),ok:0,bad:0,waitIdx:-1,done:new Set(),autoOn:new Map(),lastBeat:-1};
 
-/* ---------- audio: piano Salamander (Yamaha C5) con dinámica, estéreo, sala y final natural ---------- */
-let ac=null,master=null;const voices=new Map();
-function audio(){if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();
-    // limitador suave: transparente hasta −3 dB, solo redondea picos extremos (un compresor aplanaba los contrastes: todo sonaba forte)
+/* ---------- audio: piano Salamander (Yamaha C5) por niveles, con dinámica, sala, apagadores, pedal y resonancia ---------- */
+// Niveles (⚙ Sonido): 0 Básico = piano incluido (sin descarga, funciona sin internet) · 1 Estándar = 4 capas de fuerza ·
+// 2 Alto = 8 capas + apagadores (golpe y resonancia al soltar) + resonancia con pedal · 3 Máximo = las 16 capas + todo lo anterior + ruido del pedal.
+// Muestras ESTÉREO en sonido/ (Ogg Vorbis, armadas con Paquetes/Sonido/armar_sonido.py); quedan guardadas en el teléfono (Cache Storage).
+// Fuerza -> capa, dinámica dentro de la capa (amp_veltrack 73 %) y volumen de los ruidos: tal como los define el autor en su SFZ.
+let ac=null,master=null,resG=null,resIn=null;const voices=new Map();
+const SQ=[{n:'Básico',L:[],rel:0,ped:0,res:0,mb:0},{n:'Estándar',L:[4,8,12,16],rel:0,ped:0,res:0,mb:0},
+  {n:'Alto',L:[2,4,6,8,10,12,14,16],rel:1,ped:0,res:1,mb:0},{n:'Máximo',L:[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],rel:1,ped:1,res:1,mb:0}];
+const SND_LOUD={"21":[-32.1,-26.56,-24.99,-23.44,-21.98,-21.25,-19.99,-19.4,-19.0,-18.7,-17.43,-16.9,-16.11,-15.81,-14.42,-13.26],"24":[-27.2,-24.24,-21.96,-21.33,-20.47,-20.17,-19.87,-19.11,-18.81,-18.25,-17.95,-17.17,-16.22,-15.23,-14.52,-13.67],"27":[-27.45,-23.37,-23.07,-21.63,-20.21,-19.91,-18.84,-18.09,-17.09,-16.71,-16.41,-15.67,-15.06,-14.37,-13.19,-12.15],"30":[-34.05,-26.05,-23.71,-22.12,-20.44,-20.14,-18.9,-18.48,-18.18,-17.88,-17.58,-16.73,-16.04,-14.93,-14.51,-13.15],"33":[-31.36,-26.31,-23.5,-21.94,-20.98,-19.75,-19.45,-19.15,-18.85,-18.55,-17.68,-16.62,-15.98,-14.84,-13.58,-13.27],"36":[-32.82,-25.06,-22.75,-21.55,-20.43,-19.9,-19.18,-18.55,-17.96,-17.24,-16.44,-15.88,-14.69,-13.92,-12.52,-11.54],"39":[-26.42,-24.11,-21.2,-20.13,-19.34,-18.72,-18.31,-17.7,-17.2,-16.87,-16.56,-15.87,-14.73,-13.59,-12.48,-11.32],"42":[-29.76,-24.69,-21.75,-20.62,-19.82,-18.75,-17.99,-17.13,-16.83,-15.94,-15.58,-15.22,-13.96,-13.05,-11.88,-10.75],"45":[-31.99,-26.65,-24.86,-23.35,-22.55,-21.94,-20.86,-20.56,-20.02,-19.59,-18.37,-17.86,-15.7,-15.1,-13.73,-12.35],"48":[-30.17,-25.73,-23.48,-22.07,-21.29,-20.99,-20.09,-18.69,-18.15,-17.59,-17.29,-16.49,-15.69,-14.61,-13.21,-11.97],"51":[-29.01,-25.8,-23.04,-21.01,-20.36,-19.83,-19.5,-19.03,-18.28,-17.72,-17.42,-17.08,-15.65,-14.92,-13.7,-12.38],"54":[-32.54,-28.83,-26.86,-25.07,-23.98,-22.36,-21.41,-20.76,-20.36,-19.73,-18.98,-18.26,-17.47,-16.62,-14.75,-12.61],"57":[-37.81,-33.38,-29.35,-26.95,-25.58,-24.28,-23.8,-22.8,-21.72,-20.87,-19.03,-18.69,-17.11,-16.44,-15.05,-13.97],"60":[-29.74,-25.8,-23.84,-22.09,-20.85,-20.19,-19.22,-18.63,-17.84,-16.3,-15.0,-14.28,-13.75,-11.77,-11.47,-11.17],"63":[-33.94,-28.75,-25.95,-25.08,-23.62,-22.96,-21.78,-20.8,-20.03,-19.53,-19.06,-18.44,-17.64,-16.08,-15.32,-13.62],"66":[-34.08,-30.94,-27.26,-24.95,-24.39,-22.6,-21.56,-21.07,-20.0,-19.39,-18.48,-17.71,-16.37,-14.98,-13.77,-11.5],"69":[-32.78,-28.68,-27.12,-24.75,-22.44,-21.1,-20.61,-19.85,-19.21,-18.41,-17.36,-16.48,-15.96,-14.48,-13.16,-11.87],"72":[-33.01,-28.48,-25.41,-23.64,-22.12,-21.7,-20.97,-20.67,-19.64,-18.81,-17.74,-16.57,-15.17,-13.73,-12.42,-11.66],"75":[-29.14,-28.61,-26.17,-25.06,-24.62,-24.02,-23.13,-22.42,-21.58,-20.51,-19.43,-18.32,-16.62,-14.74,-12.52,-11.62],"78":[-33.2,-28.38,-25.75,-23.66,-22.71,-21.71,-20.93,-20.15,-19.74,-18.33,-17.37,-16.51,-15.06,-14.22,-11.81,-10.73],"81":[-42.27,-37.54,-34.54,-30.25,-28.89,-27.55,-25.33,-24.67,-24.03,-23.04,-22.12,-21.14,-19.7,-18.57,-17.43,-15.78],"84":[-37.57,-33.76,-31.37,-31.07,-30.77,-29.17,-27.07,-26.66,-22.85,-22.04,-20.48,-19.39,-19.09,-18.26,-16.97,-15.44],"87":[-40.51,-36.82,-32.04,-28.86,-25.45,-23.86,-22.65,-21.76,-21.26,-20.3,-19.49,-18.93,-17.3,-15.84,-14.36,-13.68],"90":[-45.12,-37.0,-34.48,-32.96,-30.97,-29.65,-28.45,-27.37,-26.22,-25.16,-23.79,-22.27,-21.6,-19.95,-18.95,-16.99],"93":[-40.17,-36.58,-34.83,-32.38,-30.61,-30.31,-29.18,-27.85,-26.25,-25.02,-23.58,-21.69,-20.3,-18.95,-17.5,-14.9],"96":[-45.89,-44.72,-39.41,-36.1,-34.85,-32.18,-31.2,-29.08,-28.75,-27.11,-25.43,-24.52,-21.27,-20.04,-18.61,-17.33],"99":[-52.3,-43.41,-42.94,-41.14,-39.58,-37.98,-35.29,-32.92,-31.71,-29.36,-28.54,-26.62,-25.42,-23.43,-21.2,-18.2],"102":[-43.97,-40.15,-37.63,-36.7,-35.54,-34.28,-33.09,-32.62,-30.93,-30.02,-29.04,-26.92,-25.82,-25.31,-22.25,-19.42],"105":[-58.28,-50.53,-47.82,-42.76,-40.04,-39.21,-37.87,-36.2,-34.01,-32.54,-30.61,-29.21,-26.75,-25.12,-22.67,-19.47],"108":[-44.81,-42.26,-40.43,-38.73,-37.81,-36.12,-35.09,-34.17,-33.32,-32.41,-31.4,-30.08,-28.39,-26.24,-23.77,-22.35]};// sonoridad medida de cada nota muestreada en cada capa (dB, info.json): la app mezcla capas vecinas sin saltos
+const VEL_LO=[1,27,35,37,44,47,51,57,65,73,81,89,97,105,113,121,128];// SFZ: velocidad MIDI mínima de cada capa
+const SND_DIR='sonido/',SND_CACHE='piano-sonido-1',SND_G=.267,RES_LVL=.3;
+S.sq=Math.max(0,Math.min(3,store.get('sq',(navigator.deviceMemory||4)>=4?2:1)));
+const sndHttp=()=>location.protocol.startsWith('http');
+function audio(){if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+    // limitador suave: transparente hasta −3 dB, solo redondea picos extremos (un compresor aplanaba los contrastes)
     const lim=ac.createWaveShaper();lim.curve=limCurve();lim.connect(ac.destination);
     master=ac.createGain();master.gain.value=.9;master.connect(lim);
-    // sala: reverberación generada (sin archivos) donde los agudos se apagan antes que los graves, como en una sala real
-    const cv=ac.createConvolver(),wet=ac.createGain();cv.buffer=roomIR(2);wet.gain.value=.13;master.connect(cv).connect(wet).connect(lim)}
+    // sala: reverberación generada donde los agudos se apagan antes que los graves, como en una sala real
+    const cv=ac.createConvolver(),wet=ac.createGain();cv.buffer=roomIR(2);wet.gain.value=.13;master.connect(cv).connect(wet).connect(lim);
+    // resonancia por simpatía: con el pedal pisado las demás cuerdas quedan libres y vibran (halo largo y oscuro)
+    resIn=ac.createGain();resG=ac.createGain();resG.gain.value=0;const rc=ac.createConvolver();rc.buffer=resIR(3.4);resIn.connect(rc).connect(resG).connect(master);
+    sbInit();if(S.song)setTimeout(()=>sndPrep(S.song))}
   if(ac.state==='suspended')ac.resume();return ac}
 function limCurve(){const n=2049,c=new Float32Array(n);for(let i=0;i<n;i++){const x=i/(n-1)*2-1,a=Math.abs(x);c[i]=Math.sign(x)*(a<.7?a:.7+.3*Math.tanh((a-.7)/.3))}return c}
-// antes: ruido casi blanco durante 1,6 s (cola con brillo de ~5.900 Hz = "metálico"); ahora la cola se oscurece (~1.700 Hz)
 function roomIR(sec){const sr=ac.sampleRate,n=Math.floor(sr*sec),b=ac.createBuffer(2,n,sr),pre=Math.floor(sr*.018);
   for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);let l1=0,l2=0;
     for(let i=0;i<n;i++){const t=i/sr,fc=Math.max(700,7000*Math.exp(-t*2.2)),a=Math.exp(-2*Math.PI*fc/sr),w=(Math.random()*2-1)*Math.exp(-t*3.6);l1=l1*a+w*(1-a);l2=l2*a+l1*(1-a);d[i]=i<pre?0:l2}
     for(let k=0;k<7;k++){const at=pre+Math.floor(sr*(.004+.006*k+Math.random()*.004)+(ch?sr*.0017:0));if(at<n)d[at]+=(.5-k*.05)*(Math.random()<.5?-1:1)*.25}}
   return b}
-// cada MP3 trae ~38 ms de silencio al principio: se arranca la muestra justo antes del golpe
+// resonancia: cola lenta (≈3 s) y oscura (≈300–1.500 Hz), sin golpe inicial (crece en 60 ms)
+function resIR(sec){const sr=ac.sampleRate,n=Math.floor(sr*sec),b=ac.createBuffer(2,n,sr);
+  for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);let l1=0,l2=0;
+    for(let i=0;i<n;i++){const t=i/sr,fc=Math.max(300,1500*Math.exp(-t*.9)),a=Math.exp(-2*Math.PI*fc/sr),w=(Math.random()*2-1)*Math.exp(-t*1.5)*Math.min(1,t/.06);
+      l1=l1*a+w*(1-a);l2=l2*a+l1*(1-a);d[i]=l2}}
+  return b}
+// cada muestra arranca justo antes del golpe (los MP3 del piano incluido traen ~38 ms de silencio)
 function onset(b){const x=b.getChannelData(0),L=Math.min(x.length,20000);let pk=0;for(let i=0;i<L;i++)pk=Math.max(pk,Math.abs(x[i]));let on=0;while(on<L&&Math.abs(x[on])<pk*.02)on++;b._on=Math.max(0,on/b.sampleRate-.002);return b}
-// bancos de muestras: Salamander (archivos junto a la app, se cargan una vez) y FluidR3 incluido (respaldo sin internet)
-const SAL={},SB={},SL={4:{},8:{},12:{},16:{}};const LAYERS=[[4,.375,.25],[8,.63,.5],[12,.88,.76],[16,9,1]];let salLoading=false,sbLoading=false;
-const SAL_NAMES=(()=>{const o={},N={0:'C',3:'Ds',6:'Fs',9:'A'};for(let m=21;m<=108;m++)if(N[m%12]!==undefined)o[m]=N[m%12]+(Math.floor(m/12)-1);return o})();
-function loadSamples(){if(!ac)return;
-  if(!salLoading&&location.protocol.startsWith('http')){salLoading=true;
-    for(const v of [12,8,16,4])for(const m in SAL_NAMES)fetch('salamander2/'+SAL_NAMES[m]+'-v'+v+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SL[v][m]=onset(buf)).catch(()=>{});
-    for(const m in SAL_NAMES)fetch('salamander/'+SAL_NAMES[m]+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SAL[m]=onset(buf)).catch(()=>{})}
-  if(!sbLoading&&window.PIANO_SAMPLES){sbLoading=true;
-    for(const k in PIANO_SAMPLES){const b=Uint8Array.from(atob(PIANO_SAMPLES[k]),c=>c.charCodeAt(0)).buffer;ac.decodeAudioData(b).then(buf=>SB[k]=onset(buf)).catch(()=>{})}}}
+
+/* piano incluido (FluidR3, 1 de cada 3 notas): nivel Básico y respaldo mientras cargan las muestras o sin internet */
+const SB={};let sbLoading=false;
+function sbInit(){if(sbLoading||!window.PIANO_SAMPLES)return;sbLoading=true;
+  for(const k in PIANO_SAMPLES){const b=Uint8Array.from(atob(PIANO_SAMPLES[k]),c=>c.charCodeAt(0)).buffer;ac.decodeAudioData(b).then(buf=>SB[k]=onset(buf)).catch(()=>{})}}
 function nearest(bank,m){let best=null;for(const k in bank)if(best===null||Math.abs(k-m)<Math.abs(best-m))best=+k;return best!==null&&Math.abs(best-m)<=2?best:null}
-function sampleOn(m,vel){const vv=Math.max(.05,Math.min(1,vel));let bank=null,best=null,ref=0;
-  // capa según la fuerza; si aún no cargó, la capa más cercana; si no, el banco viejo
-  const li=LAYERS.findIndex(l=>vv<l[1]),ord=[li,li-1,li+1,li-2,li+2,li-3,li+3].filter(i=>i>=0&&i<4);
-  for(const i of ord){const b=nearest(SL[LAYERS[i][0]],m);if(b!==null){bank=SL[LAYERS[i][0]];best=b;ref=LAYERS[i][2];break}}
-  if(best===null){bank=SAL;best=nearest(SAL,m);if(best===null){bank=SB;best=nearest(SB,m)}}if(best===null)return false;
+function sbOn(m,vel){const best=nearest(SB,m);if(best===null)return false;
   const t=ac.currentTime,src=ac.createBufferSource(),tone=ac.createBiquadFilter(),g=ac.createGain(),v=Math.max(.05,Math.min(1,vel));
-  src.buffer=bank[best];src.playbackRate.value=2**((m-best)/12);
-  // dinámica: más fuerte = más volumen y más brillo (como el martillo sobre la cuerda)
-  tone.type='lowpass';tone.Q.value=.3;let G;if(ref){tone.frequency.value=Math.min(20000,2400*2**(v*3.1));G=.34*Math.min(1.4,Math.max(.5,v/ref))}else{tone.frequency.value=1800+v*v*14000;G=.08+v*v*.92}
+  src.buffer=SB[best];src.playbackRate.value=2**((m-best)/12);
+  tone.type='lowpass';tone.Q.value=.3;tone.frequency.value=1800+v*v*14000;const G=.08+v*v*.92;
   g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(G,t+.002+(1-v)*.009);src.connect(tone).connect(g);
-  // estéreo: graves a la izquierda, agudos a la derecha (como sentado frente al piano)
   if(ac.createStereoPanner){const pn=ac.createStereoPanner();pn.pan.value=Math.max(-.6,Math.min(.6,(m-64)/50));g.connect(pn).connect(master)}else g.connect(master);
-  noteOff(m,true);src.start(t,bank[best]._on||0);voices.set(m,{g,o1:src,o2:null});return true}
-function noteOn(m,vel=.7){if(!S.snd)return;audio();loadSamples();if(sampleOn(m,vel))return;const a=audio(),f=440*2**((m-69)/12),t=a.currentTime;
+  noteOff(m,true);src.start(t,SB[best]._on||0);voices.set(m,{g,src:[src],m,v,t0:t});return true}
+
+/* muestras Salamander: se bajan una vez (Cache Storage) y se decodifican según la obra, con tope de memoria */
+const SAL_NAMES=(()=>{const o={},N={0:'C',3:'Ds',6:'Fs',9:'A'};for(let m=21;m<=108;m++)if(N[m%12]!==undefined)o[m]=N[m%12]+(Math.floor(m/12)-1);return o})();
+const SN={buf:new Map(),busy:new Map(),use:new Map(),pin:new Set(),bytes:0,clock:0,bad:0};
+// tope de memoria para muestras decodificadas (cada una ≈2,5 MB en estéreo): se descartan las menos usadas
+const sndBudget=()=>{const dm=navigator.deviceMemory||4;return (dm>=8?420:dm>=6?340:dm>=4?240:150)*1048576};
+const smpOf=m=>{const r=m%3===0?m:m%3===1?m-1:m+1;return Math.max(21,Math.min(108,r))};// nota muestreada más cercana (C, D#, F#, A: cada 3 semitonos)
+const sid=(s,k)=>SAL_NAMES[s]+'v'+k;
+async function sndRaw(id){const u=SND_DIR+id+'.ogg';
+  if(window.caches)try{const c=await caches.open(SND_CACHE);let r=await c.match(u);if(r)return await r.arrayBuffer();
+    const f=await fetch(u);if(!f.ok)throw new Error(f.status);const b=await f.clone().arrayBuffer();c.put(u,f).catch(()=>{});return b}catch(e){}
+  const f=await fetch(u);if(!f.ok)throw new Error(u);return f.arrayBuffer()}
+function sndLoad(id){if(SN.buf.has(id))return Promise.resolve(SN.buf.get(id));if(SN.busy.has(id))return SN.busy.get(id);if(!sndHttp()||!ac)return Promise.resolve(null);
+  const p=sndRaw(id).then(a=>ac.decodeAudioData(a)).then(b=>{onset(b);SN.buf.set(id,b);SN.use.set(id,++SN.clock);SN.bytes+=b.length*b.numberOfChannels*4;sndTrim();return b})
+    .catch(()=>{SN.bad++;return null}).finally(()=>SN.busy.delete(id));
+  SN.busy.set(id,p);return p}
+function sndGet(id){const b=SN.buf.get(id);if(b){SN.use.set(id,++SN.clock);return b}sndLoad(id);return null}
+function sndTrim(){const B=sndBudget();if(SN.bytes<=B)return;
+  for(const[id]of [...SN.use.entries()].sort((a,b)=>a[1]-b[1])){if(SN.bytes<=B*.85)break;if(SN.pin.has(id))continue;
+    const b=SN.buf.get(id);if(b){SN.bytes-=b.length*b.numberOfChannels*4;SN.buf.delete(id)}SN.use.delete(id)}}
+// fuerza (0..1) -> posición continua entre capas (1..16) según las velocidades del SFZ del autor
+function velX(v){const vel=Math.max(1,Math.min(127,v*127));let k=0;while(k<15&&vel>=VEL_LO[k+1])k++;
+  return Math.max(1,Math.min(16,k+.5+(vel-VEL_LO[k]+.5)/(VEL_LO[k+1]-VEL_LO[k])))}
+const velTrack=(v,vt)=>(1-vt)+vt*Math.min(1,v)**2;// SFZ amp_veltrack: dentro de la capa, más fuerza = más volumen
+// el autor usa 73 % (≈33 dB de pp a ff, pensado para una sala); en el parlante de un celular el pp se pierde: 45 % (≈24 dB)
+const VT=.45;
+const LN=(s,k)=>SND_LOUD[s][k-1],LNx=(s,x)=>{const k=Math.floor(x),f=x-k;return k>=16?LN(s,16):LN(s,k)+(LN(s,k+1)-LN(s,k))*f};
+// capa del nivel más cercana a la posición x (como el SFZ: una capa por nota, sin mezclar; mezclar capas en fase daba saltos)
+function sndLayer(q,x){let a=q.L[0];for(const k of q.L)if(Math.abs(k-x)<Math.abs(a-x))a=k;return a}
+function smpOn(m,vel){const q=SQ[S.sq];if(!q||!q.L.length||!sndHttp()||!SND_LOUD[60])return false;
+  const s=smpOf(m),v=Math.max(.01,Math.min(1,vel)),x=velX(v),T=LNx(s,x);
+  // volumen corregido para que suene exactamente a la sonoridad de la posición x (fuerza continua, sin escalones entre capas)
+  const c=k=>10**(Math.max(-9,Math.min(9,T-LN(s,k)))/20);
+  let k=sndLayer(q,x),buf=sndGet(sid(s,k));
+  if(!buf){// la capa justa aún no está: la más cercana que ya esté lista
+    let best=null;for(const j of q.L)if(SN.buf.has(sid(s,j))&&(best===null||Math.abs(j-x)<Math.abs(best-x)))best=j;
+    if(best===null)return false;k=best;buf=sndGet(sid(s,k))}
+  const parts=[[buf,c(k)]];
+  const t=ac.currentTime,g=ac.createGain(),rate=2**((m-s)/12),src=[],G=SND_G*velTrack(v,VT);
+  // ataque: el martillo suave tarda un poco más en "hablar" (2–6 ms)
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(G,t+.002+(1-v)*.004);
+  for(const[buf,gg]of parts){const xs=ac.createBufferSource(),pg=ac.createGain();xs.buffer=buf;xs.playbackRate.value=rate;pg.gain.value=gg;xs.connect(pg).connect(g);src.push(xs)}
+  g.connect(master);if(q.res)g.connect(resIn);
+  noteOff(m,true);for(const xs of src)xs.start(t,xs.buffer._on||0);voices.set(m,{g,src,m,v,t0:t,smp:1,rate});return true}
+function sampleOn(m,vel){return smpOn(m,vel)||sbOn(m,vel)}
+// ruidos y resonancias (volúmenes del SFZ): golpe del apagador al soltar (rel1..88, −37 dB), resonancia de cuerdas al soltar
+// (harmL fuerte / harmS suave, −4 dB, + harmV3), ruido del pedal (−20 dB). Bajan cuanto más tiempo estuvo apretada la tecla (rt_decay).
+function sndFx(id,gain,rate){const b=sndGet(id);if(!b||!ac||gain<1e-5)return;const t=ac.currentTime,x=ac.createBufferSource(),g=ac.createGain();x.buffer=b;if(rate)x.playbackRate.value=rate;g.gain.value=gain;x.connect(g).connect(master);x.start(t,b._on||0)}
+const dB=d=>10**(d/20);
+function sndRelease(v,m,t){const held=t-v.t0,s=smpOf(m),vel=v.v*127;
+  sndFx('rel'+(m-20),SND_G*dB(-37-2*held)*velTrack(v.v,.82));
+  if(m<=88){const rd=m<38?6:m<47?7:m<50?8:9;
+    sndFx((vel>=45?'harmL':'harmS')+SAL_NAMES[s],SND_G*dB((vel>=45?-4:0)-rd*held)*velTrack(v.v,vel>=45?.9:.9),v.rate);
+    sndFx('harmV3'+SAL_NAMES[s],SND_G*dB(-2*held)*velTrack(v.v,.96),v.rate)}}
+let pedFxN=0;
+function sndPedal(on,quiet){const q=SQ[S.sq];if(!ac||!q)return;const t=ac.currentTime;
+  if(q.res)resG.gain.setTargetAtTime(on?RES_LVL:0,t,on?.05:.12);
+  if(!quiet&&q.ped&&sndHttp())sndFx((on?'pedalD':'pedalU')+(1+(pedFxN++&1)),SND_G*dB(on?-20:-19))}
+// prepara lo que va a sonar en la obra: capas justas de cada nota (Escuchar), capas típicas del rango (tocar en pantalla), apagadores
+function sndPrep(song){const q=SQ[S.sq];SN.pin.clear();if(!song||!q||!q.L.length||!sndHttp()||!SND_LOUD[60]||!ac)return;
+  const ids=[],seen=new Set(),add=id=>{if(!seen.has(id)){seen.add(id);ids.push(id)}};
+  for(const n of [...song.notes].sort((x,y)=>x.t-y.t)){const s=smpOf(n.m),v=n.vx??(n.v||.5);add(sid(s,sndLayer(q,velX(v))));
+    if(q.rel){add('rel'+(n.m-20));if(n.m<=88){add((v*127>=45?'harmL':'harmS')+SAL_NAMES[s]);add('harmV3'+SAL_NAMES[s])}}}
+  for(const v of [.45,.65,.3,.85])for(let m=smpOf(S.mlo);m<=S.mhi+1;m+=3)add(sid(m,sndLayer(q,velX(v))));
+  if(q.ped)['pedalD1','pedalD2','pedalU1','pedalU2'].forEach(add);
+  const B=sndBudget()*.75;let est=0;for(const id of ids){if(est>B)break;SN.pin.add(id);est+=/^(rel|harm|pedal)/.test(id)?400e3:2.8e6}
+  SN.queue=ids.filter(id=>SN.pin.has(id));sndPump()}
+// una sola cola de carga (4 a la vez): al cambiar de obra se reemplaza la cola, sin trabarse con lo que estaba cargando
+function sndPump(){const Q=SN.queue||[];while(Q.length&&SN.busy.size<4){const id=Q.shift();if(SN.buf.has(id))continue;sndLoad(id).then(()=>{sndInfo();sndPump()})}}
+// descarga completa del nivel (queda guardada en el teléfono), con progreso en ⚙
+let sndDl=null;
+async function sndDownload(lv,auto){const q=SQ[lv];if(!q.L.length)return sndInfo();if(!sndHttp()){sndInfo();return}
+  // al abrir la app con datos móviles o ahorro de datos no se baja todo el nivel: solo lo que pide cada obra
+  const cn=navigator.connection;if(auto&&cn&&(cn.saveData||cn.type==='cellular'))return sndInfo();
+  const ids=[];for(const s in SAL_NAMES)for(const k of q.L)ids.push(sid(+s,k));
+  if(q.rel){for(let i=1;i<=88;i++)ids.push('rel'+i);for(const s in SAL_NAMES)if(+s<=88)ids.push('harmL'+SAL_NAMES[s],'harmS'+SAL_NAMES[s],'harmV3'+SAL_NAMES[s])}if(q.ped)ids.push('pedalD1','pedalD2','pedalU1','pedalU2');
+  const job=sndDl={lv,done:0,tot:ids.length,bad:0};sndInfo();let i=0;
+  const worker=async()=>{while(i<ids.length&&sndDl===job){const id=ids[i++];
+      try{const u=SND_DIR+id+'.ogg';if(window.caches){const c=await caches.open(SND_CACHE);if(!(await c.match(u))){const f=await fetch(u);if(!f.ok)throw 0;await c.put(u,f)}}else await sndRaw(id)}catch(e){job.bad++}
+      job.done++;if(job.done%8===0||job.done===job.tot)sndInfo()}};
+  await Promise.all([1,2,3,4,5,6].map(worker));if(sndDl!==job)return;sndDl=null;
+  if(job.bad)toast('Sonido '+q.n+': faltaron '+job.bad+' muestras (¿sin internet?). Se reintenta al volver a elegirlo.',4500);else toast('🎹 Sonido '+q.n+' listo y guardado en este dispositivo',2500);
+  sndInfo();if(S.song)sndPrep(S.song)}
+function sndInfo(){const e=$('sqInfo');if(!e)return;const q=SQ[S.sq];
+  e.textContent=!q.L.length?'(incluido)':!sndHttp()?'(solo desde la web; en archivo suena Básico)':sndDl&&sndDl.lv===S.sq?'descargando '+Math.round(sndDl.done/sndDl.tot*100)+' %':
+    '('+SN.buf.size+' muestras listas · '+Math.round(SN.bytes/1048576)+' MB)'}
+function setSq(lv){lv=Math.max(0,Math.min(3,lv));const ch=lv!==S.sq;S.sq=lv;store.set('sq',lv);seg('sq',lv);
+  if(ch){for(const m of [...voices.keys()])noteOff(m,true);SN.buf.clear();SN.use.clear();SN.pin.clear();SN.bytes=0;if(resG&&ac)resG.gain.value=0}
+  audio();sndDownload(lv);if(S.song)sndPrep(S.song);sndInfo()}
+function noteOn(m,vel=.7){if(!S.snd)return;audio();if(sampleOn(m,vel))return;const a=audio(),f=440*2**((m-69)/12),t=a.currentTime;
   const g=a.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vel*.5,t+.005);g.gain.exponentialRampToValueAtTime(vel*.18,t+.4);g.gain.exponentialRampToValueAtTime(.0008,t+3.5);
   const o1=a.createOscillator(),o2=a.createOscillator(),lp=a.createBiquadFilter();o1.type='triangle';o2.type='sine';o1.frequency.value=f;o2.frequency.value=f*2;
   lp.type='lowpass';lp.frequency.value=Math.min(9000,f*6);const g2=a.createGain();g2.gain.value=.25;
   o1.connect(lp);o2.connect(g2).connect(lp);lp.connect(g).connect(master);o1.start(t);o2.start(t);o1.stop(t+3.6);o2.stop(t+3.6);
-  noteOff(m);voices.set(m,{g,o1,o2})}
-function noteOff(m,quick){const v=voices.get(m);if(!v||!ac)return;const t=ac.currentTime,rel=quick?.05:v.o2?.08:Math.max(.12,Math.min(.6,(72-m)/60*.6+.18));v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.setTargetAtTime(0,t,rel/3);v.o1.stop(t+rel*2+.1);if(v.o2)v.o2.stop(t+rel*2+.1);voices.delete(m)}
+  noteOff(m);voices.set(m,{g,src:[o1,o2],m,v:vel,t0:t,osc:1})}
+// soltar: el apagador baja (más lento en los graves) + golpe y resonancia del apagador; desde Fa6 (89) no hay apagador: se apaga lento
+function noteOff(m,quick){const v=voices.get(m);if(!v||!ac)return;voices.delete(m);const t=ac.currentTime,q=SQ[S.sq];
+  const rel=quick?.05:v.osc?.08:v.smp&&m>=89?5:Math.max(.12,Math.min(.6,(72-m)/60*.6+.18));
+  v.g.gain.cancelScheduledValues(t);v.g.gain.setValueAtTime(v.g.gain.value,t);v.g.gain.setTargetAtTime(0,t,rel/3);for(const x of v.src)x.stop(t+rel*2+.1);
+  if(!quick&&v.smp&&m<89&&q&&q.rel)sndRelease(v,m,t)}
 function click(acc,force){if(!S.met&&!force)return;const a=audio(),t=a.currentTime,o=a.createOscillator(),g=a.createGain();o.frequency.value=acc?1600:1000;g.gain.setValueAtTime(.25,t);g.gain.exponentialRampToValueAtTime(.001,t+.05);o.connect(g).connect(master);o.start(t);o.stop(t+.06)}
 
 /* ---------- MIDI ---------- */
@@ -399,7 +503,7 @@ function chordAt(i){const t=S.song.notes[i].t;return S.song.notes.filter(n=>mine
 function nextWait(fromT){const r=range();return S.song.notes.findIndex(n=>mine(n)&&n.t>=fromT-1e-6&&n.t>=r.a&&n.t<r.z)}
 function advanceWait(){const t=S.song.notes[S.waitIdx].t;S.done.clear();S.waitIdx=nextWait(t+1e-4);if(S.waitIdx<0)S.waitIdx=-2}
 function stats(){$('sOk').textContent=S.ok;$('sBad').textContent=S.bad}
-function resetRun(){paintSig='~';const r=range();S.pos=r.a;S.song.notes.forEach(n=>{n._hit=0;n._auto=0});S.done.clear();S.waitIdx=waitOn()?nextWait(r.a):-1;S.lastBeat=-1;for(const m of S.autoOn.keys())noteOff(m);S.autoOn.clear();releaseSus();drawKb();updateCursor(true);passStart()}
+function resetRun(){paintSig='~';const r=range();S.pos=r.a;S.song.notes.forEach(n=>{n._hit=0;n._auto=0});S.done.clear();S.waitIdx=waitOn()?nextWait(r.a):-1;S.lastBeat=-1;for(const m of S.autoOn.keys())noteOff(m);S.autoOn.clear();releaseSus();S._pd=false;sndPedal(false,true);drawKb();updateCursor(true);passStart()}
 
 let lastTs=0;
 function tick(ts){
@@ -409,7 +513,7 @@ function tick(ts){
     if(waitOn()&&S.waitIdx>=0){const t=S.song.notes[S.waitIdx].t;if(S.pos+adv>=t)adv=Math.max(0,t-S.pos)}
     const np=S.pos+adv;
     for(const n of S.song.notes){if(n.t>=S.pos&&n.t<np&&n.t>=r.a&&n.t<r.z&&!mine(n)&&!n._auto){n._auto=1;S.sus.delete(n.m);noteOn(n.m,n.vx??(n.v||.5));S.autoOn.set(n.m,n.t+n.d);if(!S.held.has(n.m))fx.set(n.m,{t0:performance.now(),t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
-    const pd=pedalDown(np);for(const[m,end]of S.autoOn){if(np>=end){if(pd)S.sus.add(m);else noteOff(m);S.autoOn.delete(m);const f=fx.get(m);if(f&&!S.held.has(m))f.t1=performance.now()}}if(!pd&&S.sus.size)releaseSus();
+    const pd=pedalDown(np);if(pd!==!!S._pd){S._pd=pd;sndPedal(pd)}for(const[m,end]of S.autoOn){if(np>=end){if(pd)S.sus.add(m);else noteOff(m);S.autoOn.delete(m);const f=fx.get(m);if(f&&!S.held.has(m))f.t1=performance.now()}}if(!pd&&S.sus.size)releaseSus();
     const fb=Math.floor(np+1e-6),cin=np<r.a-1e-6;if(fb!==S.lastBeat&&(fb>=r.a||cin)&&adv>0){S.lastBeat=fb;const bar=S.song.bars.find(b=>fb>=b.t&&fb<b.t+b.len);click(cin?fb===S.cin0:bar&&Math.abs(fb-bar.t)<1e-6,cin)}
     S.pos=np;
     if(S.waitIdx===-2||S.pos>=r.z){passEnd();if(S.loop)resetRun();else{setPlay(false);if(!$('result').classList.contains('show'))toast('Fin · ✔ '+S.ok+'  ✖ '+S.bad,3000)}}
@@ -426,14 +530,14 @@ function recEv(k,m,v){const R=S.rec;if(!R||R.ev.length>40000)return;if(k==='n'&&
   R.ev.push({ms:R.clk+(S.playing?Math.min(100,Math.max(0,performance.now()-lastTs)):0),k,m,v,p:S.pos})}
 function recTick(dt){const R=S.rec;if(!R||!S.playing)return;R.clk+=dt*1000;if(R.clk-R.ls>=100){R.ls=R.clk;R.ev.push({ms:R.clk,k:'s',p:S.pos})}}
 const rOn=(m,v)=>{const s=S.snd;S.snd=true;noteOn(m,v);S.snd=s};// la escucha suena aunque el sonido de la app esté apagado
-function replayStart(){const R=S.lastRec;if(!R||!S.song)return;if(S.playing)setPlay(false);audio();loadSamples();
+function replayStart(){const R=S.lastRec;if(!R||!S.song)return;if(S.playing)setPlay(false);audio();
   const f=R.ev[0];S.replaying={ev:R.ev,i:0,clk:f.ms,ped:false,lp:f.p,end:R.ev[R.ev.length-1].ms+900};S.pos=f.p;
   $('play').innerHTML=ic('pause');awake();toast('🎧 Así lo tocaste · tocá una tecla o ⏸ para parar',2600)}
 function replayTick(dt){const P=S.replaying,E=P.ev,now=performance.now();P.clk+=dt*1000;
   while(P.i<E.length&&E[P.i].ms<=P.clk){const e=E[P.i++];
     if(e.k==='n'){rOn(e.m,e.v);fx.set(e.m,{t0:now,t1:0,c:'#b48cff'})}
     else if(e.k==='o'){if(P.ped)S.sus.add(e.m);else noteOff(e.m);const f=fx.get(e.m);if(f)f.t1=now}
-    else if(e.k==='p'){P.ped=!!e.v;if(!P.ped)releaseSus()}}
+    else if(e.k==='p'){P.ped=!!e.v;sndPedal(P.ped);if(!P.ped)releaseSus()}}
   const a=E[P.i-1],b=E[P.i];if(a)S.pos=b&&b.ms>a.ms?a.p+(b.p-a.p)*Math.min(1,(P.clk-a.ms)/(b.ms-a.ms)):a.p;
   // la otra mano (la que tocaba la app) vuelve a sonar en su lugar
   const r=range();for(const n of S.song.notes){if(n.t>=S.pos)break;if(n.t>=P.lp&&n.t>=r.a&&n.t<r.z&&!mine(n)){rOn(n.m,n.vx??(n.v||.5));S.autoOn.set(n.m,n.t+n.d);fx.set(n.m,{t0:now,t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
@@ -567,7 +671,7 @@ $('scoreWrap').addEventListener('click',e=>{if(!osmd||!S.song||pinch.done>perfor
   syncRange();resetRun()});
 
 /* ---------- controles ---------- */
-function setPlay(p){if(S.replaying)replayStop();S.playing=p;$('play').innerHTML=ic(p?'pause':'play');awake();if(p){audio();const r=range();if(S.pos<r.a-1e-6||S.pos>=r.z)resetRun();countIn()}else{for(const m of S.autoOn.keys())noteOff(m);S.autoOn.clear();releaseSus()}}
+function setPlay(p){if(S.replaying)replayStop();S.playing=p;$('play').innerHTML=ic(p?'pause':'play');awake();if(p){audio();const r=range();if(S.pos<r.a-1e-6||S.pos>=r.z)resetRun();countIn()}else{for(const m of S.autoOn.keys())noteOff(m);S.autoOn.clear();releaseSus();S._pd=false;sndPedal(false,true)}}
 function syncRange(){$('from').value=S.from;$('to').value=S.to;updateLoopBox()}
 function seg(k,v){document.querySelectorAll(`[data-${k}]`).forEach(b=>b.classList.toggle('on',b.dataset[k]===String(v)))}
 $('play').onclick=()=>S.replaying?replayStop():setPlay(!S.playing);
@@ -605,6 +709,7 @@ function onOff(id,v){$(id).classList.toggle('on',v);$(id).textContent=v?'On':'Of
 function setCin(v){S.cinOn=v;store.set('cin',v);onOff('cinBtn',v)}
 function setProg(v){S.prog=v;store.set('prog',v);onOff('progBtn',v)}
 setCin(store.get('cin',true));setProg(store.get('prog',false));
+document.querySelectorAll('[data-sq]').forEach(b=>b.onclick=()=>setSq(+b.dataset.sq));seg('sq',S.sq);sndInfo();sndDownload(S.sq,true);
 $('cinBtn').onclick=()=>setCin(!S.cinOn);$('progBtn').onclick=()=>{setProg(!S.prog);if(S.prog)toast('En bucle: cada pasada de 90 % o más sube el tempo 5 %',2600)};
 $('menuBtn').onclick=e=>{e.stopPropagation();$('menu').classList.toggle('show')};
 document.addEventListener('click',e=>{if(!$('menu').contains(e.target)&&e.target!==$('menuBtn'))$('menu').classList.remove('show')});
@@ -620,7 +725,7 @@ async function dev(op,key,val){const db=await idb();return new Promise((ok,ko)=>
   const r=op==='get'?st.get(key):op==='keys'?st.getAllKeys():op==='del'?st.delete(key):st.put(val,key);r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error)})}
 async function loadXML(txt,name){
   replayStop();S.lastRec=null;S.xml=txt;S.song=parseMusicXML(txt);if(name&&S.song.title==='Sin título')S.song.title=name;expressive(S.song);
-  const ms=S.song.notes.map(n=>n.m);S.mlo=Math.min(...ms);S.mhi=Math.max(...ms);fitRange();
+  const ms=S.song.notes.map(n=>n.m);S.mlo=Math.min(...ms);S.mhi=Math.max(...ms);fitRange();sndPrep(S.song);
   S.from=1;S.to=S.song.bars.length;$('from').max=$('to').max=S.song.bars.length;syncRange();S.ok=S.bad=0;stats();setPlay(false);resetRun();
   document.title=S.song.title+' · Piano Práctica';tempoUI();pedUI();await renderScore();drawKb()}
 
