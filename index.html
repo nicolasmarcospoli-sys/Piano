@@ -154,7 +154,7 @@ body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font
   <div id="scoreWrap"><div id="score"></div><div id="loopBox" class="mbox"></div><div id="cur" class="mbox"></div></div>
   <canvas id="roll"></canvas>
   <canvas id="kb"></canvas>
-  <div id="kbTools"><button class="b" id="fitBtn" title="Teclado: solo las teclas de la obra / amplio">↔</button><span id="pedInd" title="Pedal de resonancia: se enciende al pisarlo">Ped</span></div>
+  <div id="kbTools"><button class="b" id="fitBtn" title="Teclado: solo las teclas de la obra / amplio">↔</button><span id="pedInd" title="Sustain: dorado relleno = pedal pisado (en 🎧, el de la app) · borde dorado = la obra pide pedal">Ped</span></div>
   <div id="zoomTools"><button class="b" id="zOut" title="Partitura más chica">−</button><button class="b" id="zIn" title="Partitura más grande">+</button></div>
 </div>
 <div id="result"></div>
@@ -179,6 +179,7 @@ body.pc #bar{padding:5px 10px;gap:6px}body.pc .b{height:34px;min-width:36px;font
   <div class="row"><span>Cifrar mis obras (en la PC)</span><label class="b">🔐 Elegir archivo<input id="encFile" type="file" accept=".json,application/json" hidden></label></div>
   <div class="row lbl">Sonido: Salamander Grand Piano (Yamaha C5) · Alexander Holm · CC-BY 3.0</div>
   <div class="row lbl">Tocá un compás de la partitura para saltar ahí. ✂ y dos toques = elegir tramo.</div>
+  <div class="row lbl" style="line-height:1.45">Sustain: “Ped” junto al teclado. <b style="color:#d9c08a">Relleno dorado</b> = pedal pisado (en 🎧, el de la app) · <b style="color:#d9c08a">borde dorado</b> = la obra pide pedal · franja dorada a la izquierda de la cascada = tramos con pedal. 🩺 Probar también detecta tu pedal.</div>
 </div>
 <div id="hist"></div>
 <dialog id="pwDlg"><form method="dialog" id="pwForm">
@@ -244,6 +245,24 @@ function parseMusicXML(txt){
   return {title,tempo:tempo||100,notes,bars,end:beat,pedal:pedal.sort((a,b)=>a.t-b.t)};
 }
 
+/* ---------- interpretación: obras sin fuerza escrita (o todas las notas iguales) reciben una dinámica musical ---------- */
+// melodía (nota más aguda de la mano derecha) por encima del acompañamiento, acento al inicio del compás, arco de frase
+// cada 4 compases, la melodía un poco más fuerte al subir, y una variación mínima (fija, igual en cada escucha).
+// Las obras que ya traen la fuerza de una interpretación real quedan como están.
+const SOFT_WORKS=/Clair de Lune|Claro de Luna — 1|Gymnop|Gnossienne|Appassionata — 2|Patética — 2|Rêverie|cheveux|Lacrimosa/i;
+function expressive(s,title){const N=s.notes.filter(n=>!n.g),vs=N.filter(n=>n.v).map(n=>n.v);
+  const mu=vs.reduce((a,b)=>a+b,0)/(vs.length||1),sd=Math.sqrt(vs.reduce((a,b)=>a+(b-mu)**2,0)/(vs.length||1));
+  if(vs.length>N.length*.8&&sd*127>=3){for(const n of s.notes)n.vx=n.v||.5;s.expr=false;return}
+  const base=SOFT_WORKS.test(title||s.title)?.4:.55,bars=s.bars,byT=new Map();s.expr=true;
+  for(const n of N){const k=Math.round(n.t*96);(byT.get(k)||byT.set(k,[]).get(k)).push(n)}
+  let bi=0;for(const k of [...byT.keys()].sort((a,b)=>a-b)){const g=byT.get(k),t=k/96;
+    while(bi<bars.length-1&&t>=bars[bi].t+bars[bi].len-1e-6)bi++;const b=bars[bi]||{t:0,len:4},pos=t-b.t;
+    const metric=pos<1e-3?.04:Math.abs(pos-Math.round(pos))<1e-3?0:-.03,ph=((bi%4)+Math.min(1,Math.max(0,pos/(b.len||4))))/4,arch=.06*Math.sin(Math.PI*ph)-.02;
+    const R=g.filter(n=>n.h==='R'),L=g.filter(n=>n.h==='L'),top=R.length?Math.max(...R.map(n=>n.m)):null,bass=L.length?Math.min(...L.map(n=>n.m)):null;
+    for(const n of g){let v=base+metric+arch+(n.h==='R'?(n.m===top?.07+(n.m-67)/48*.06:-.05):(n.m===bass?-.03:-.1))+Math.min(.04,n.d*.015);
+      const h=Math.sin(n.t*12.9898+n.m*78.233)*43758.5453;v+=(h-Math.floor(h)-.5)*.05;n.vx=Math.max(.12,Math.min(.92,v))}}
+  for(const n of s.notes)if(n.g)n.vx=Math.max(.12,base-.08)}
+
 /* ---------- estado ---------- */
 const S={song:null,xml:'',playing:false,pos:0,act:store.get('act','practice'),mode:store.get('mode','wait'),hand:store.get('hand','B'),speed:store.get('speed',60),
   snd:store.get('snd',true),met:store.get('met',false),loop:store.get('loop',true),names:store.get('names',1),from:1,to:1,sel:0,
@@ -252,23 +271,30 @@ const S={song:null,xml:'',playing:false,pos:0,act:store.get('act','practice'),mo
 /* ---------- audio: piano Salamander (Yamaha C5) con dinámica, estéreo, sala y final natural ---------- */
 let ac=null,master=null;const voices=new Map();
 function audio(){if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();
-    // compresor suave: los acordes fuertes no saturan
-    const comp=ac.createDynamicsCompressor();comp.threshold.value=-14;comp.knee.value=12;comp.ratio.value=3;comp.attack.value=.005;comp.release.value=.2;comp.connect(ac.destination);
-    master=ac.createGain();master.gain.value=.55;master.connect(comp);
-    // sala: reverberación suave con una respuesta generada (sin archivos)
-    const cv=ac.createConvolver(),wet=ac.createGain();cv.buffer=roomIR(1.6);wet.gain.value=.16;master.connect(cv).connect(wet).connect(comp)}
+    // limitador suave: transparente hasta −3 dB, solo redondea picos extremos (un compresor aplanaba los contrastes: todo sonaba forte)
+    const lim=ac.createWaveShaper();lim.curve=limCurve();lim.connect(ac.destination);
+    master=ac.createGain();master.gain.value=.9;master.connect(lim);
+    // sala: reverberación generada (sin archivos) donde los agudos se apagan antes que los graves, como en una sala real
+    const cv=ac.createConvolver(),wet=ac.createGain();cv.buffer=roomIR(2);wet.gain.value=.13;master.connect(cv).connect(wet).connect(lim)}
   if(ac.state==='suspended')ac.resume();return ac}
-function roomIR(sec){const n=Math.floor(ac.sampleRate*sec),b=ac.createBuffer(2,n,ac.sampleRate),pre=ac.sampleRate*.012;
-  for(let c=0;c<2;c++){const d=b.getChannelData(c);let lp=0;for(let i=0;i<n;i++){lp=lp*.55+(Math.random()*2-1)*Math.pow(1-i/n,3.2)*.45;d[i]=i<pre?0:lp}}return b}
+function limCurve(){const n=2049,c=new Float32Array(n);for(let i=0;i<n;i++){const x=i/(n-1)*2-1,a=Math.abs(x);c[i]=Math.sign(x)*(a<.7?a:.7+.3*Math.tanh((a-.7)/.3))}return c}
+// antes: ruido casi blanco durante 1,6 s (cola con brillo de ~5.900 Hz = "metálico"); ahora la cola se oscurece (~1.700 Hz)
+function roomIR(sec){const sr=ac.sampleRate,n=Math.floor(sr*sec),b=ac.createBuffer(2,n,sr),pre=Math.floor(sr*.018);
+  for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);let l1=0,l2=0;
+    for(let i=0;i<n;i++){const t=i/sr,fc=Math.max(700,7000*Math.exp(-t*2.2)),a=Math.exp(-2*Math.PI*fc/sr),w=(Math.random()*2-1)*Math.exp(-t*3.6);l1=l1*a+w*(1-a);l2=l2*a+l1*(1-a);d[i]=i<pre?0:l2}
+    for(let k=0;k<7;k++){const at=pre+Math.floor(sr*(.004+.006*k+Math.random()*.004)+(ch?sr*.0017:0));if(at<n)d[at]+=(.5-k*.05)*(Math.random()<.5?-1:1)*.25}}
+  return b}
+// cada MP3 trae ~38 ms de silencio al principio: se arranca la muestra justo antes del golpe
+function onset(b){const x=b.getChannelData(0),L=Math.min(x.length,20000);let pk=0;for(let i=0;i<L;i++)pk=Math.max(pk,Math.abs(x[i]));let on=0;while(on<L&&Math.abs(x[on])<pk*.02)on++;b._on=Math.max(0,on/b.sampleRate-.002);return b}
 // bancos de muestras: Salamander (archivos junto a la app, se cargan una vez) y FluidR3 incluido (respaldo sin internet)
-const SAL={},SB={},SL={4:{},8:{},12:{},16:{}};const LAYERS=[[4,.3,.2],[8,.55,.42],[12,.8,.67],[16,9,.9]];let salLoading=false,sbLoading=false;
+const SAL={},SB={},SL={4:{},8:{},12:{},16:{}};const LAYERS=[[4,.375,.25],[8,.63,.5],[12,.88,.76],[16,9,1]];let salLoading=false,sbLoading=false;
 const SAL_NAMES=(()=>{const o={},N={0:'C',3:'Ds',6:'Fs',9:'A'};for(let m=21;m<=108;m++)if(N[m%12]!==undefined)o[m]=N[m%12]+(Math.floor(m/12)-1);return o})();
 function loadSamples(){if(!ac)return;
   if(!salLoading&&location.protocol.startsWith('http')){salLoading=true;
-    for(const v of [12,8,16,4])for(const m in SAL_NAMES)fetch('salamander2/'+SAL_NAMES[m]+'-v'+v+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SL[v][m]=buf).catch(()=>{});
-    for(const m in SAL_NAMES)fetch('salamander/'+SAL_NAMES[m]+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SAL[m]=buf).catch(()=>{})}
+    for(const v of [12,8,16,4])for(const m in SAL_NAMES)fetch('salamander2/'+SAL_NAMES[m]+'-v'+v+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SL[v][m]=onset(buf)).catch(()=>{});
+    for(const m in SAL_NAMES)fetch('salamander/'+SAL_NAMES[m]+'.mp3').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>ac.decodeAudioData(b)).then(buf=>SAL[m]=onset(buf)).catch(()=>{})}
   if(!sbLoading&&window.PIANO_SAMPLES){sbLoading=true;
-    for(const k in PIANO_SAMPLES){const b=Uint8Array.from(atob(PIANO_SAMPLES[k]),c=>c.charCodeAt(0)).buffer;ac.decodeAudioData(b).then(buf=>SB[k]=buf).catch(()=>{})}}}
+    for(const k in PIANO_SAMPLES){const b=Uint8Array.from(atob(PIANO_SAMPLES[k]),c=>c.charCodeAt(0)).buffer;ac.decodeAudioData(b).then(buf=>SB[k]=onset(buf)).catch(()=>{})}}}
 function nearest(bank,m){let best=null;for(const k in bank)if(best===null||Math.abs(k-m)<Math.abs(best-m))best=+k;return best!==null&&Math.abs(best-m)<=2?best:null}
 function sampleOn(m,vel){const vv=Math.max(.05,Math.min(1,vel));let bank=null,best=null,ref=0;
   // capa según la fuerza; si aún no cargó, la capa más cercana; si no, el banco viejo
@@ -278,10 +304,11 @@ function sampleOn(m,vel){const vv=Math.max(.05,Math.min(1,vel));let bank=null,be
   const t=ac.currentTime,src=ac.createBufferSource(),tone=ac.createBiquadFilter(),g=ac.createGain(),v=Math.max(.05,Math.min(1,vel));
   src.buffer=bank[best];src.playbackRate.value=2**((m-best)/12);
   // dinámica: más fuerte = más volumen y más brillo (como el martillo sobre la cuerda)
-  tone.type='lowpass';if(ref){tone.frequency.value=7000+v*13000;tone.Q.value=.3;g.gain.setValueAtTime(.34*Math.min(1.35,Math.max(.6,(v/ref)**.7)),t)}else{tone.frequency.value=1800+v*v*14000;tone.Q.value=.3;g.gain.setValueAtTime(.08+v*v*.92,t)}src.connect(tone).connect(g);
+  tone.type='lowpass';tone.Q.value=.3;let G;if(ref){tone.frequency.value=Math.min(20000,2400*2**(v*3.1));G=.34*Math.min(1.4,Math.max(.5,v/ref))}else{tone.frequency.value=1800+v*v*14000;G=.08+v*v*.92}
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(G,t+.002+(1-v)*.009);src.connect(tone).connect(g);
   // estéreo: graves a la izquierda, agudos a la derecha (como sentado frente al piano)
   if(ac.createStereoPanner){const pn=ac.createStereoPanner();pn.pan.value=Math.max(-.6,Math.min(.6,(m-64)/50));g.connect(pn).connect(master)}else g.connect(master);
-  noteOff(m,true);src.start(t);voices.set(m,{g,o1:src,o2:null});return true}
+  noteOff(m,true);src.start(t,bank[best]._on||0);voices.set(m,{g,o1:src,o2:null});return true}
 function noteOn(m,vel=.7){if(!S.snd)return;audio();loadSamples();if(sampleOn(m,vel))return;const a=audio(),f=440*2**((m-69)/12),t=a.currentTime;
   const g=a.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vel*.5,t+.005);g.gain.exponentialRampToValueAtTime(vel*.18,t+.4);g.gain.exponentialRampToValueAtTime(.0008,t+3.5);
   const o1=a.createOscillator(),o2=a.createOscillator(),lp=a.createBiquadFilter();o1.type='triangle';o2.type='sine';o1.frequency.value=f;o2.frequency.value=f*2;
@@ -307,7 +334,9 @@ $('diagBtn').onclick=async()=>{const o=$('diagOut');o.style.display='block';cons
   if(!navigator.requestMIDIAccess||!window.isSecureContext)return;
   try{const acc=await navigator.requestMIDIAccess();const ins=[...acc.inputs.values()];
     L.push('✅ Permiso MIDI concedido');L.push((ins.length?'✅ Piano detectado: '+ins.map(i=>i.name).join(', '):'❌ No se detecta el piano: revisá cable OTG, que el piano esté encendido, y desenchufá/enchufá'));
-    if(ins.length){L.push('👉 Tocá una tecla del piano…');w();ins.forEach(i=>i.addEventListener('midimessage',e=>{if((e.data[0]&0xf0)===0x90&&e.data[2]>0){L[L.length-1]='✅ Tecla recibida: '+noteName({s:null,m:e.data[1]})+(Math.floor(e.data[1]/12)-1)+' — ¡todo funciona!';w()}}))}
+    if(ins.length){L.push('👉 Tocá una tecla del piano…');const ki=L.length-1;L.push('👉 Pisá el pedal de sustain…');const pi=L.length-1;w();
+      ins.forEach(i=>i.addEventListener('midimessage',e=>{const c=e.data[0]&0xf0;if(c===0x90&&e.data[2]>0){L[ki]='✅ Tecla recibida: '+noteName({s:null,m:e.data[1]})+(Math.floor(e.data[1]/12)-1)+' — ¡todo funciona!';w()}
+        else if(c===0xB0&&e.data[1]===64){L[pi]=(e.data[2]>=64?'✅ Pedal pisado':'✅ Pedal suelto')+' — el sustain llega a la app';w()}}))}
     connectMIDI()}catch(e){L.push('❌ Permiso MIDI denegado: en Chrome, ⋮ → Configuración → Configuración de sitios → Dispositivos MIDI')}
   w()};
 function onMidi(e){const[st,d1,d2]=e.data,c=st&0xf0;if(c===0x90&&d2>0){awake();press(d1,d2/127,false,e.timeStamp)}else if(c===0x80||(c===0x90&&d2===0))release(d1);else if(c===0xB0&&d1===64)setPed(d2>=64)}
@@ -315,7 +344,8 @@ function onMidi(e){const[st,d1,d2]=e.data,c=st&0xf0;if(c===0x90&&d2>0){awake();p
 function setPed(on){if(!!S.ped!==on)recEv('p',0,on?1:0);S.ped=on;S.pedSeen=true;pedUI()}
 let pedMisT=0;
 function pedUI(){const el=$('pedInd');if(!el)return;const has=!!(S.song&&S.song.pedal&&S.song.pedal.length);el.classList.toggle('vis',has||!!S.pedSeen);
-  const exp=has&&pedalDown(S.pos),warn=has&&practicing()&&pedMisT&&performance.now()-pedMisT>350;el.classList.toggle('on',!!S.ped);el.classList.toggle('exp',!!exp&&!S.ped);el.classList.toggle('warn',!!warn);
+  const exp=has&&pedalDown(S.pos),warn=has&&practicing()&&pedMisT&&performance.now()-pedMisT>350;const app=!practicing()&&exp;// en 🎧 Escuchar se enciende cuando la app pisa el pedal
+  el.classList.toggle('on',!!S.ped||app);el.classList.toggle('exp',!!exp&&!S.ped&&!app);el.classList.toggle('warn',!!warn);
   const tx=warn?(exp?'Pisá el pedal':'Soltá el pedal'):'Ped';if(el.textContent!==tx)el.textContent=tx}
 // cada cuadro: ¿coincide tu pedal con el de la partitura? (con 0,35 s de gracia para el cambio)
 function pedTrack(dt){const has=!!(S.song&&S.song.pedal&&S.song.pedal.length);if(!has||!practicing()||!S.playing){pedMisT=0;return}// el aviso solo mientras se toca
@@ -378,7 +408,7 @@ function tick(ts){
   if(S.playing&&S.song){const r=range();let adv=dt/beatSec();
     if(waitOn()&&S.waitIdx>=0){const t=S.song.notes[S.waitIdx].t;if(S.pos+adv>=t)adv=Math.max(0,t-S.pos)}
     const np=S.pos+adv;
-    for(const n of S.song.notes){if(n.t>=S.pos&&n.t<np&&n.t>=r.a&&n.t<r.z&&!mine(n)&&!n._auto){n._auto=1;S.sus.delete(n.m);noteOn(n.m,n.v||.62);S.autoOn.set(n.m,n.t+n.d);if(!S.held.has(n.m))fx.set(n.m,{t0:performance.now(),t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
+    for(const n of S.song.notes){if(n.t>=S.pos&&n.t<np&&n.t>=r.a&&n.t<r.z&&!mine(n)&&!n._auto){n._auto=1;S.sus.delete(n.m);noteOn(n.m,n.vx??(n.v||.5));S.autoOn.set(n.m,n.t+n.d);if(!S.held.has(n.m))fx.set(n.m,{t0:performance.now(),t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
     const pd=pedalDown(np);for(const[m,end]of S.autoOn){if(np>=end){if(pd)S.sus.add(m);else noteOff(m);S.autoOn.delete(m);const f=fx.get(m);if(f&&!S.held.has(m))f.t1=performance.now()}}if(!pd&&S.sus.size)releaseSus();
     const fb=Math.floor(np+1e-6),cin=np<r.a-1e-6;if(fb!==S.lastBeat&&(fb>=r.a||cin)&&adv>0){S.lastBeat=fb;const bar=S.song.bars.find(b=>fb>=b.t&&fb<b.t+b.len);click(cin?fb===S.cin0:bar&&Math.abs(fb-bar.t)<1e-6,cin)}
     S.pos=np;
@@ -406,7 +436,7 @@ function replayTick(dt){const P=S.replaying,E=P.ev,now=performance.now();P.clk+=
     else if(e.k==='p'){P.ped=!!e.v;if(!P.ped)releaseSus()}}
   const a=E[P.i-1],b=E[P.i];if(a)S.pos=b&&b.ms>a.ms?a.p+(b.p-a.p)*Math.min(1,(P.clk-a.ms)/(b.ms-a.ms)):a.p;
   // la otra mano (la que tocaba la app) vuelve a sonar en su lugar
-  const r=range();for(const n of S.song.notes){if(n.t>=S.pos)break;if(n.t>=P.lp&&n.t>=r.a&&n.t<r.z&&!mine(n)){rOn(n.m,n.v||.62);S.autoOn.set(n.m,n.t+n.d);fx.set(n.m,{t0:now,t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
+  const r=range();for(const n of S.song.notes){if(n.t>=S.pos)break;if(n.t>=P.lp&&n.t>=r.a&&n.t<r.z&&!mine(n)){rOn(n.m,n.vx??(n.v||.5));S.autoOn.set(n.m,n.t+n.d);fx.set(n.m,{t0:now,t1:0,c:n.h==='R'?'#4f9dff':'#ffa94d'})}}
   for(const[m,end]of S.autoOn)if(S.pos>=end){if(P.ped||pedalDown(S.pos))S.sus.add(m);else noteOff(m);S.autoOn.delete(m);const f=fx.get(m);if(f)f.t1=now}
   P.lp=Math.max(P.lp,S.pos);if(P.i>=E.length&&P.clk>=P.end)replayStop(true)}
 function replayStop(done){if(!S.replaying)return;S.replaying=null;for(const m of [...voices.keys()])noteOff(m);S.sus.clear();S.autoOn.clear();$('play').innerHTML=ic('play');resetRun();if(done)toast('Fin de tu pasada · ↺ para volver a intentar',2000)}
@@ -442,7 +472,7 @@ function drawRoll(){if(!S.song)return;const d=fit(roll),W=roll.width,H=roll.heig
   const ahead=5,ppb=H/ahead,r=range();
   x.strokeStyle='#232838';x.lineWidth=d;x.fillStyle='#4a5168';x.font=`${10*d}px system-ui`;
   S.song.bars.forEach((b,i)=>{const y=H-(b.t-S.pos)*ppb;if(y<0||y>H)return;x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();x.fillText(i+1,3*d,y-3*d)});
-  const P=S.song.pedal;if(P&&P.length){x.fillStyle='rgba(166,138,74,.55)';for(let i=0;i<P.length;i++){if(!P[i].d)continue;const t0=P[i].t,t1=i+1<P.length?P[i+1].t:S.song.end;const ya=H-(t1-S.pos)*ppb,yb=H-(t0-S.pos)*ppb;if(yb<0||ya>H)continue;x.fillRect(0,Math.max(0,ya)+1*d,4*d,Math.min(H,yb)-Math.max(0,ya)-2*d)}}
+  const P=S.song.pedal;if(P&&P.length){x.fillStyle='rgba(166,138,74,.55)';for(let i=0;i<P.length;i++){if(!P[i].d)continue;const t0=P[i].t,t1=i+1<P.length?P[i+1].t:S.song.end;const ya=H-(t1-S.pos)*ppb,yb=H-(t0-S.pos)*ppb;if(yb<0||ya>H)continue;x.fillRect(0,Math.max(0,ya)+1*d,6*d,Math.min(H,yb)-Math.max(0,ya)-2*d)}}
   const waitT=waitOn()&&S.waitIdx>=0?S.song.notes[S.waitIdx].t:null;
   for(const n of S.song.notes){const y1=H-(n.t-S.pos)*ppb,y0=y1-n.d*ppb;if(y0>H||y1<0||!g[n.m])continue;
     const k=g[n.m],inR=n.t>=r.a&&n.t<r.z,my=mine(n);
@@ -589,7 +619,7 @@ const idb=()=>new Promise((ok,ko)=>{const r=indexedDB.open('piano-practica',1);r
 async function dev(op,key,val){const db=await idb();return new Promise((ok,ko)=>{const tx=db.transaction('songs',op==='get'||op==='keys'?'readonly':'readwrite'),st=tx.objectStore('songs');
   const r=op==='get'?st.get(key):op==='keys'?st.getAllKeys():op==='del'?st.delete(key):st.put(val,key);r.onsuccess=()=>ok(r.result);r.onerror=()=>ko(r.error)})}
 async function loadXML(txt,name){
-  replayStop();S.lastRec=null;S.xml=txt;S.song=parseMusicXML(txt);if(name&&S.song.title==='Sin título')S.song.title=name;
+  replayStop();S.lastRec=null;S.xml=txt;S.song=parseMusicXML(txt);if(name&&S.song.title==='Sin título')S.song.title=name;expressive(S.song);
   const ms=S.song.notes.map(n=>n.m);S.mlo=Math.min(...ms);S.mhi=Math.max(...ms);fitRange();
   S.from=1;S.to=S.song.bars.length;$('from').max=$('to').max=S.song.bars.length;syncRange();S.ok=S.bad=0;stats();setPlay(false);resetRun();
   document.title=S.song.title+' · Piano Práctica';tempoUI();pedUI();await renderScore();drawKb()}
