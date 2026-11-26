@@ -314,11 +314,11 @@ function setPed(on){S.ped=on;S.pedSeen=true;pedUI()}
 let pedMisT=0;
 function pedUI(){const el=$('pedInd');if(!el)return;const has=!!(S.song&&S.song.pedal&&S.song.pedal.length);el.classList.toggle('vis',has||!!S.pedSeen);
   const exp=has&&pedalDown(S.pos),warn=has&&practicing()&&pedMisT&&performance.now()-pedMisT>350;el.classList.toggle('on',!!S.ped);el.classList.toggle('exp',!!exp&&!S.ped);el.classList.toggle('warn',!!warn);
-  el.textContent=warn?(exp?'Pisá el pedal':'Soltá el pedal'):'Ped'}
+  const tx=warn?(exp?'Pisá el pedal':'Soltá el pedal'):'Ped';if(el.textContent!==tx)el.textContent=tx}
 // cada cuadro: ¿coincide tu pedal con el de la partitura? (con 0,35 s de gracia para el cambio)
-function pedTrack(dt){const has=!!(S.song&&S.song.pedal&&S.song.pedal.length);if(!has||!practicing()){pedMisT=0;return}
+function pedTrack(dt){const has=!!(S.song&&S.song.pedal&&S.song.pedal.length);if(!has||!practicing()||!S.playing){pedMisT=0;return}// el aviso solo mientras se toca
   const ok=pedalDown(S.pos)===!!S.ped;if(ok)pedMisT=0;else if(!pedMisT)pedMisT=performance.now();
-  if(S.playing&&S.p0){S.p0.pt+=dt;if(ok||performance.now()-pedMisT<=350)S.p0.pg+=dt}}
+  const mov=S.pos!==pedTrack.lp;pedTrack.lp=S.pos;if(S.playing&&S.p0&&mov){S.p0.pt+=dt;if(ok||performance.now()-pedMisT<=350)S.p0.pg+=dt}}
 
 /* ---------- pantalla completa, horizontal y pantalla siempre encendida ---------- */
 let wake=null;
@@ -340,17 +340,19 @@ const fx=new Map();// m -> {t0: inicio, t1: soltada, c: color}
 function press(m,vel=.7,screen=false){
   S.held.add(m);fx.set(m,{t0:performance.now(),t1:0,c:'#6aa7ff'});if(screen)noteOn(m,vel);
   if(!S.song||!practicing())return;const r=range();
+  if(waitOn()&&S.waitIdx>=0&&!S.playing)setPlay(true);// tocar = seguir practicando
   if(waitOn()&&S.waitIdx>=0){const need=chordAt(S.waitIdx);
     if(need.some(n=>n.m===m)){
       // la nota todavía no llegó a la línea: no cuenta (margen 0,15 s para la anticipación natural)
       if((need[0].t-S.pos)*beatSec()>.15){early(m);stats();return}
       S.done.add(m);fx.get(m).c='#3ecf8e';if(S.p0)S.p0.on++;if(need.every(n=>S.done.has(n.m))){S.ok+=need.length;advanceWait()}}
     else wrong(m)}
-  else if(S.playing){const tol=Math.max(.18/beatSec(),.25);let cand=null;
+  else if(S.playing){const tol=Math.min(.5,Math.max(.3/beatSec(),.25));let cand=null;// ventana: 0,3 s (máx. medio tiempo)
     for(const n of S.song.notes){if(n.t-S.pos>tol)break;if(mine(n)&&!n._hit&&n.m===m&&Math.abs(n.t-S.pos)<=tol&&n.t>=r.a&&n.t<r.z&&(!cand||Math.abs(n.t-S.pos)<Math.abs(cand.t-S.pos)))cand=n}
     if(cand){cand._hit=1;S.ok++;const ds=(S.pos-cand.t)*beatSec(),f=fx.get(m);
       // a tiempo = ±0,1 s; si no, se marca antes o tarde (igual cuenta como nota correcta)
       if(Math.abs(ds)<=.1){f.c='#3ecf8e';if(S.p0)S.p0.on++}else{f.c='#f0b541';f.lbl=ds<0?'antes':'tarde';if(S.p0)S.p0.off++}}
+    else if(S.song.notes.some(n=>mine(n)&&!n._hit&&n.m===m&&n.t>S.pos&&n.t-S.pos<=1.5&&n.t<r.z))early(m);
     else wrong(m)}
   stats()}
 function release(m){S.held.delete(m);const f=fx.get(m);if(f)f.t1=performance.now();noteOff(m)}
@@ -364,7 +366,7 @@ function resetRun(){paintSig='~';const r=range();S.pos=r.a;S.song.notes.forEach(
 
 let lastTs=0;
 function tick(ts){
-  const dt=Math.min(.1,(ts-lastTs)/1000||0);lastTs=ts;
+  const dt=Math.max(0,Math.min(.1,(ts-lastTs)/1000||0));lastTs=Math.max(lastTs,ts);
   if(S.playing&&S.song){const r=range();let adv=dt/beatSec();
     if(waitOn()&&S.waitIdx>=0){const t=S.song.notes[S.waitIdx].t;if(S.pos+adv>=t)adv=Math.max(0,t-S.pos)}
     const np=S.pos+adv;
@@ -372,7 +374,7 @@ function tick(ts){
     const pd=pedalDown(np);for(const[m,end]of S.autoOn){if(np>=end){if(pd)S.sus.add(m);else noteOff(m);S.autoOn.delete(m);const f=fx.get(m);if(f&&!S.held.has(m))f.t1=performance.now()}}if(!pd&&S.sus.size)releaseSus();
     const fb=Math.floor(np+1e-6);if(fb!==S.lastBeat&&fb>=r.a&&adv>0){S.lastBeat=fb;const bar=S.song.bars.find(b=>fb>=b.t&&fb<b.t+b.len);click(bar&&Math.abs(fb-bar.t)<1e-6)}
     S.pos=np;
-    if(S.waitIdx===-2||S.pos>=r.z){passEnd();if(S.loop)resetRun();else{setPlay(false);toast('Fin · ✔ '+S.ok+'  ✖ '+S.bad,3000)}}
+    if(S.waitIdx===-2||S.pos>=r.z){passEnd();if(S.loop)resetRun();else{setPlay(false);if(!$('result').classList.contains('show'))toast('Fin · ✔ '+S.ok+'  ✖ '+S.bad,3000)}}
   }
   pedTrack(dt);pedUI();stepInertia();drawRoll();drawKb();updateCursor();followScore();paintScore();requestAnimationFrame(tick)}
 
@@ -409,7 +411,7 @@ function drawRoll(){if(!S.song)return;const d=fit(roll),W=roll.width,H=roll.heig
   x.globalAlpha=1;drawGlow(x,g,H,d,performance.now());x.fillStyle='#ffffff40';x.fillRect(0,H-2*d,W,2*d)}
 // intensidad de la animación de una tecla: sube rápido al tocar, se desvanece suave al soltar
 const ease=t=>1-Math.pow(1-Math.min(1,Math.max(0,t)),3);
-function fxAmt(m,now){const f=fx.get(m);if(!f)return 0;if(!f.t1)return ease((now-f.t0)/70);const a=1-ease((now-f.t1)/260);if(a<=0){fx.delete(m);return 0}return a}
+function fxAmt(m,now){const f=fx.get(m);if(!f)return 0;if(!f.t1)return ease((now-f.t0)/70);const a=1-ease((now-f.t1)/260);if(a<=0){if(!f.lbl||now-f.t0>900)fx.delete(m);return 0}return a}
 function drawKb(){if(!kb.offsetParent)return;const d=fit(kb),W=kb.width,H=kb.height,x=kb.getContext('2d'),g=keyGeom(W),now=performance.now();
   x.fillStyle='#000';x.fillRect(0,0,W,H);
   for(let pass=0;pass<2;pass++)for(let m=lo;m<=hi;m++){const k=g[m];if(!k||k.b!==pass)continue;const h=pass?H*.62:H,a=fxAmt(m,now),f=fx.get(m);
